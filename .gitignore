@@ -12,3 +12,7 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Local working drafts; publish final reports as LaTeX/PDF artifacts later.
+reports/*draft*.md
+reports/drafts/
