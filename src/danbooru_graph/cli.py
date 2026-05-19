@@ -22,6 +22,15 @@ from danbooru_graph.recommendation import (
     RecommendationEngine,
     parse_tags,
 )
+from danbooru_graph.query import (
+    DEFAULT_CHARACTER_VOCAB_PATH,
+    DEFAULT_GENDER_PROFILE_PATH,
+    DEFAULT_RAW_INPUT,
+    QUERY_RANK_COLUMNS,
+    build_character_gender_profile as build_character_gender_profile_pipeline,
+    dataframe_to_records,
+    query_characters_by_general_tags,
+)
 from danbooru_graph.scoring import SCORE_SORT_COLUMNS, score_edges as score_edges_pipeline
 from danbooru_graph.sparse_edges import build_edges as build_edges_pipeline
 from danbooru_graph.visualization import export_community_graph as export_community_graph_pipeline
@@ -228,6 +237,94 @@ def recommend_tags(
             f"{index:>2}. {item['tag']}  score={item['score']:.4f} "
             f"strategy={item['strategy']}{community} sources={sources}"
         )
+
+
+@app.command("build-gender-profile")
+def build_gender_profile(
+    input: str = typer.Option(DEFAULT_RAW_INPUT, "--input", help="Raw Danbooru Parquet path, directory, or glob."),
+    out: Path = typer.Option(Path("data/processed/evaluation"), "--out", help="Evaluation output directory."),
+    min_character_count: int = typer.Option(50, "--min-character-count", min=1),
+    min_gender_evidence: int = typer.Option(10, "--min-gender-evidence", min=1),
+    female_threshold: float = typer.Option(0.8, "--female-threshold", min=0.5, max=1.0),
+) -> None:
+    out_path = build_character_gender_profile_pipeline(
+        input,
+        out,
+        min_character_count=min_character_count,
+        min_gender_evidence=min_gender_evidence,
+        female_threshold=female_threshold,
+    )
+    typer.echo(f"Wrote character gender profile to {out_path}")
+
+
+@app.command("query-characters")
+def query_characters(
+    input: str = typer.Option(DEFAULT_RAW_INPUT, "--input", help="Raw Danbooru Parquet path, directory, or glob."),
+    include_general: str = typer.Option(
+        ...,
+        "--include-general",
+        help="Comma-separated general tags, e.g. dark-skinned_male,dark-skinned_female.",
+    ),
+    mode: str = typer.Option("and", "--mode", help="and or or."),
+    top_k: int = typer.Option(50, "--top-k", min=1),
+    rank_by: str = typer.Option(
+        "co_count",
+        "--rank-by",
+        help=f"Sort column. One of: {', '.join(sorted(QUERY_RANK_COLUMNS))}.",
+    ),
+    tag_vocab: Path | None = typer.Option(
+        DEFAULT_CHARACTER_VOCAB_PATH,
+        "--tag-vocab",
+        help="Optional tag vocabulary parquet for global character counts.",
+    ),
+    gender_profile: Path | None = typer.Option(
+        None,
+        "--gender-profile",
+        help="Optional character gender profile parquet.",
+    ),
+    female_only: bool = typer.Option(False, "--female-only", help="Keep only empirically female-profiled characters."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of a compact table."),
+) -> None:
+    if mode not in {"and", "or"}:
+        raise typer.BadParameter("--mode must be either and or or.")
+    if rank_by not in QUERY_RANK_COLUMNS:
+        raise typer.BadParameter(f"--rank-by must be one of: {', '.join(sorted(QUERY_RANK_COLUMNS))}.")
+
+    resolved_gender_profile = gender_profile
+    if female_only and resolved_gender_profile is None:
+        resolved_gender_profile = DEFAULT_GENDER_PROFILE_PATH
+    if female_only and (resolved_gender_profile is None or not resolved_gender_profile.exists()):
+        raise typer.BadParameter("Use build-gender-profile first, or pass --gender-profile.")
+
+    result = query_characters_by_general_tags(
+        input,
+        include_general=include_general,
+        mode=mode,
+        top_k=top_k,
+        rank_by=rank_by,
+        character_vocab=tag_vocab,
+        gender_profile=resolved_gender_profile,
+        female_only=female_only,
+    )
+    if json_output:
+        typer.echo(json.dumps(dataframe_to_records(result), ensure_ascii=False, indent=2))
+        return
+
+    metric_columns = [
+        "co_count",
+        "confidence_query_to_character",
+        "confidence_character_to_query",
+        "lift",
+        "ppmi",
+    ]
+    for index, row in enumerate(result.iter_rows(named=True), start=1):
+        metrics = " ".join(
+            f"{column}={row[column]:.4f}" if isinstance(row[column], float) else f"{column}={row[column]}"
+            for column in metric_columns
+            if column in row
+        )
+        gender = f" gender={row['gender']}" if "gender" in row and row["gender"] is not None else ""
+        typer.echo(f"{index:>2}. {row['character']}  {metrics}{gender}")
 
 
 if __name__ == "__main__":

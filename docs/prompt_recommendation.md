@@ -58,6 +58,18 @@ danbooru-graph recommend-tags --tags "asuna_(school_uniform)_(blue_archive),neru
 The CLI returns explainable recommendations with source tags, strategy names,
 and score components. It can later be wrapped by an HTTP service.
 
+For reverse lookup from general tags to characters, use the conditional query
+CLI. This is a post-level AND/OR filter rather than a neighbor expansion:
+
+```powershell
+danbooru-graph build-gender-profile --input data/raw/danbooru-2026 --out data/processed/evaluation
+danbooru-graph query-characters --include-general "dark-skinned_male,dark-skinned_female" --female-only --top-k 50
+```
+
+`--female-only` uses an empirical profile inferred from `solo + 1girl` versus
+`solo + 1boy` posts. It is useful for filtering large candidate lists, but it is
+still metadata-derived evidence rather than canonical character biology.
+
 ```python
 from pydantic import BaseModel
 from fastapi import FastAPI

@@ -152,6 +152,13 @@ danbooru-graph recommend-tags --tags "asuna_(blue_archive),neru_(blue_archive)" 
 danbooru-graph recommend-tags --tags "asuna_(school_uniform)_(blue_archive),neru_(blue_archive)" --target-category general --top-k 10
 ```
 
+Conditional character query:
+
+```powershell
+danbooru-graph build-gender-profile --input data/raw/danbooru-2026 --out data/processed/evaluation
+danbooru-graph query-characters --include-general "dark-skinned_male,dark-skinned_female" --female-only --top-k 50
+```
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)
