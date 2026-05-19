@@ -29,9 +29,11 @@ flowchart LR
     C --> D["Co-occurrence<br/>X^T X"]
     D --> E["Lift / PMI / PPMI / NPMI<br/>confidence / discounted PPMI"]
     E --> F["Louvain community detection"]
+    E --> J["Truncated SVD tag embeddings"]
     F --> G["Held-out copyright purity"]
     F --> H["General-tag summaries"]
     F --> I["Gephi GEXF / GraphML export"]
+    J --> K["Cosine nearest-neighbor search"]
 ```
 
 ## Key Results
@@ -95,6 +97,7 @@ co-drawn micro-motifs.
 - NetworkX Louvain communities with deterministic seeds.
 - Held-out copyright purity evaluation.
 - Gephi-ready GEXF/GraphML export for network visualization.
+- Truncated SVD embeddings from the discounted PPMI graph for cosine search.
 
 ## Quickstart
 
@@ -110,6 +113,14 @@ Large raw and generated data files are intentionally ignored by git.
 danbooru-graph prepare-vocab --input data/raw/danbooru-2026 --out data/processed --categories character
 danbooru-graph build-edges --processed data/processed --pair character-character --min-pair-count 5
 danbooru-graph score-edges --processed data/processed --pair character-character --discount-k 10 --sort-by discounted_ppmi --top-k 50
+```
+
+Build a deterministic representation-learning baseline:
+
+```powershell
+danbooru-graph build-embeddings --processed data/processed --pair character-character --method svd --dim 128
+danbooru-graph nearest-tags --embeddings data/processed/embeddings/character_character_svd_d128 --tag "asuna_(blue_archive)" --top-k 20
+danbooru-graph similarity-tags --embeddings data/processed/embeddings/character_character_svd_d128 --tag-a "asuna_(blue_archive)" --tag-b "karin_(blue_archive)"
 ```
 
 Detect communities and evaluate them against held-out copyright labels:
@@ -138,9 +149,8 @@ models:
 - Confidence autocomplete: `P(Y|X)` recommends canonical character traits.
 - Discounted PPMI exploration: high-information tags avoid generic stop-words.
 - Community motif injection: detected communities become reusable style packs.
-- Future embedding layer: Node2Vec or random-walk Skip-gram can generalize
-  beyond directly observed co-occurrences and serve nearest-neighbor search via
-  FAISS.
+- SVD embedding layer: cosine neighbors can generalize beyond direct edge
+  lookup; future Node2Vec or random-walk Skip-gram can expand this further.
 
 See [docs/prompt_recommendation.md](docs/prompt_recommendation.md) for the
 application design.

@@ -68,6 +68,33 @@ danbooru-graph detect-communities `
   --out-name character_communities_npmi0.6_co25_res1.5
 ```
 
+## SVD Embeddings
+
+The first representation-learning baseline factorizes the scored
+`character-character` discounted PPMI graph with truncated SVD. It does not
+require Gensim, FAISS, or GPU training.
+
+```powershell
+danbooru-graph build-embeddings `
+  --processed data/processed `
+  --pair character-character `
+  --method svd `
+  --dim 128
+
+danbooru-graph nearest-tags `
+  --embeddings data/processed/embeddings/character_character_svd_d128 `
+  --tag "asuna_(blue_archive)" `
+  --top-k 20
+
+danbooru-graph similarity-tags `
+  --embeddings data/processed/embeddings/character_character_svd_d128 `
+  --tag-a "asuna_(blue_archive)" `
+  --tag-b "karin_(blue_archive)"
+```
+
+The generated `embeddings.npy`, `embedding_vocab.parquet`, and `config.json`
+stay under ignored `data/processed/`.
+
 ## Held-Out Evaluation
 
 ```powershell

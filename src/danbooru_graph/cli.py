@@ -15,6 +15,12 @@ from danbooru_graph.evaluation import summarize_community_general_tags as summar
 from danbooru_graph.evaluation import (
     summarize_community_general_tags_from_raw as summarize_community_general_tags_from_raw_pipeline,
 )
+from danbooru_graph.embeddings import (
+    EMBEDDING_WEIGHT_COLUMNS,
+    SVD_SOLVERS,
+    TagEmbeddingIndex,
+    build_svd_embeddings as build_svd_embeddings_pipeline,
+)
 from danbooru_graph.recommendation import (
     DEFAULT_COMMUNITIES_PATH,
     DEFAULT_EDGES_PATH,
@@ -325,6 +331,76 @@ def query_characters(
         )
         gender = f" gender={row['gender']}" if "gender" in row and row["gender"] is not None else ""
         typer.echo(f"{index:>2}. {row['character']}  {metrics}{gender}")
+
+
+@app.command("build-embeddings")
+def build_embeddings(
+    processed: Path = typer.Option(..., "--processed", help="Processed directory."),
+    pair: str = typer.Option("character-character", "--pair", help="Same-category pair, e.g. character-character."),
+    method: str = typer.Option("svd", "--method", help="Embedding method. Only svd is supported in v1."),
+    dim: int = typer.Option(128, "--dim", min=1, help="Embedding dimension."),
+    weight_column: str = typer.Option(
+        "discounted_ppmi",
+        "--weight-column",
+        help=f"Scored edge weight. One of: {', '.join(sorted(EMBEDDING_WEIGHT_COLUMNS))}.",
+    ),
+    seed: int = typer.Option(42, "--seed", help="Deterministic SVD seed."),
+    solver: str = typer.Option(
+        "auto",
+        "--solver",
+        help=f"SVD solver. One of: {', '.join(sorted(SVD_SOLVERS))}.",
+    ),
+    normalize: bool = typer.Option(True, "--normalize/--no-normalize", help="L2-normalize rows for cosine search."),
+    out: Path | None = typer.Option(None, "--out", help="Optional embedding output directory."),
+) -> None:
+    if method != "svd":
+        raise typer.BadParameter("--method currently supports only svd.")
+    if weight_column not in EMBEDDING_WEIGHT_COLUMNS:
+        raise typer.BadParameter(f"--weight-column must be one of: {', '.join(sorted(EMBEDDING_WEIGHT_COLUMNS))}.")
+    if solver not in SVD_SOLVERS:
+        raise typer.BadParameter(f"--solver must be one of: {', '.join(sorted(SVD_SOLVERS))}.")
+    out_dir = build_svd_embeddings_pipeline(
+        processed,
+        pair=pair,
+        dim=dim,
+        weight_column=weight_column,
+        normalize=normalize,
+        seed=seed,
+        solver=solver,
+        out_dir=out,
+    )
+    typer.echo(f"Wrote SVD embeddings to {out_dir}")
+
+
+@app.command("nearest-tags")
+def nearest_tags(
+    embeddings: Path = typer.Option(..., "--embeddings", help="Embedding artifact directory."),
+    tag: str = typer.Option(..., "--tag", help="Query tag."),
+    top_k: int = typer.Option(20, "--top-k", min=1),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of a compact table."),
+) -> None:
+    index = TagEmbeddingIndex.from_dir(embeddings)
+    results = index.nearest(tag, top_k=top_k)
+    if json_output:
+        typer.echo(json.dumps(results, ensure_ascii=False, indent=2))
+        return
+    for item in results:
+        typer.echo(f"{item['rank']:>2}. {item['tag']}  score={item['score']:.6f} category={item['category']}")
+
+
+@app.command("similarity-tags")
+def similarity_tags(
+    embeddings: Path = typer.Option(..., "--embeddings", help="Embedding artifact directory."),
+    tag_a: str = typer.Option(..., "--tag-a", help="First tag."),
+    tag_b: str = typer.Option(..., "--tag-b", help="Second tag."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of text."),
+) -> None:
+    index = TagEmbeddingIndex.from_dir(embeddings)
+    score = index.similarity(tag_a, tag_b)
+    if json_output:
+        typer.echo(json.dumps({"tag_a": tag_a, "tag_b": tag_b, "score": score}, ensure_ascii=False, indent=2))
+        return
+    typer.echo(f"cosine({tag_a}, {tag_b}) = {score:.6f}")
 
 
 if __name__ == "__main__":
