@@ -15,6 +15,13 @@ from danbooru_graph.evaluation import summarize_community_general_tags as summar
 from danbooru_graph.evaluation import (
     summarize_community_general_tags_from_raw as summarize_community_general_tags_from_raw_pipeline,
 )
+from danbooru_graph.recommendation import (
+    DEFAULT_COMMUNITIES_PATH,
+    DEFAULT_EDGES_PATH,
+    DEFAULT_GENERAL_SUMMARY_PATH,
+    RecommendationEngine,
+    parse_tags,
+)
 from danbooru_graph.scoring import SCORE_SORT_COLUMNS, score_edges as score_edges_pipeline
 from danbooru_graph.sparse_edges import build_edges as build_edges_pipeline
 from danbooru_graph.visualization import export_community_graph as export_community_graph_pipeline
@@ -190,6 +197,37 @@ def export_community_graph(
         include_isolates=not drop_isolates,
     )
     typer.echo(f"Wrote Gephi graph to {out_path}")
+
+
+@app.command("recommend-tags")
+def recommend_tags(
+    tags: str = typer.Option(..., "--tags", help="Comma-separated current prompt tags."),
+    target_category: str = typer.Option("character", "--target-category", help="character or general."),
+    top_k: int = typer.Option(10, "--top-k", min=1),
+    edges: Path = typer.Option(DEFAULT_EDGES_PATH, "--edges", help="Scored character-character edge parquet."),
+    communities: Path = typer.Option(DEFAULT_COMMUNITIES_PATH, "--communities", help="Community JSON path."),
+    general_summary: Path = typer.Option(
+        DEFAULT_GENERAL_SUMMARY_PATH,
+        "--general-summary",
+        help="Community general summary parquet.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit full JSON instead of a compact table."),
+) -> None:
+    if target_category not in {"character", "general"}:
+        raise typer.BadParameter("--target-category must be either character or general.")
+    engine = RecommendationEngine.from_artifacts(edges, communities, general_summary)
+    recommendations = engine.recommend(parse_tags(tags), target_category=target_category, top_k=top_k)
+    if json_output:
+        typer.echo(json.dumps(recommendations, ensure_ascii=False, indent=2))
+        return
+
+    for index, item in enumerate(recommendations, start=1):
+        community = "" if item["community_id"] is None else f" c={item['community_id']}"
+        sources = ",".join(item["source_tags"])
+        typer.echo(
+            f"{index:>2}. {item['tag']}  score={item['score']:.4f} "
+            f"strategy={item['strategy']}{community} sources={sources}"
+        )
 
 
 if __name__ == "__main__":

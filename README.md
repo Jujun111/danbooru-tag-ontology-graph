@@ -145,6 +145,13 @@ models:
 See [docs/prompt_recommendation.md](docs/prompt_recommendation.md) for the
 application design.
 
+Local recommendation demo:
+
+```powershell
+danbooru-graph recommend-tags --tags "asuna_(blue_archive),neru_(blue_archive)" --target-category character --top-k 10
+danbooru-graph recommend-tags --tags "asuna_(school_uniform)_(blue_archive),neru_(blue_archive)" --target-category general --top-k 10
+```
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)

@@ -48,6 +48,16 @@ This turns graph topology into context-aware prompt expansion.
 
 ## Online API Sketch
 
+The repository currently ships a local CLI demo first:
+
+```powershell
+danbooru-graph recommend-tags --tags "asuna_(blue_archive),neru_(blue_archive)" --target-category character --top-k 10
+danbooru-graph recommend-tags --tags "asuna_(school_uniform)_(blue_archive),neru_(blue_archive)" --target-category general --top-k 10
+```
+
+The CLI returns explainable recommendations with source tags, strategy names,
+and score components. It can later be wrapped by an HTTP service.
+
 ```python
 from pydantic import BaseModel
 from fastapi import FastAPI
