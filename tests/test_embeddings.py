@@ -12,6 +12,8 @@ from danbooru_graph.embeddings import (
     TagEmbeddingIndex,
     build_svd_embeddings,
     build_symmetric_weight_matrix,
+    default_embedding_dir,
+    _remove_top_components,
 )
 
 
@@ -114,7 +116,62 @@ def test_build_svd_embeddings_writes_artifacts(tmp_path) -> None:
     assert embeddings.shape == (4, 2)
     assert vocab["tag"].to_list() == ["a", "b", "c", "d"]
     assert config["dim"] == 2
+    assert config["alpha"] == pytest.approx(0.5)
     assert np.allclose(norms[norms > 0], 1.0, atol=1e-5)
+
+
+def test_alpha_changes_default_output_dir_and_config(tmp_path) -> None:
+    processed = _write_processed_fixture(tmp_path)
+
+    assert default_embedding_dir(processed, "character-character", "svd", 2).name == "character_character_svd_d2"
+    assert (
+        default_embedding_dir(processed, "character-character", "svd", 2, alpha=0.0).name
+        == "character_character_svd_d2_a0"
+    )
+
+    out_dir = build_svd_embeddings(processed, dim=2, seed=0, alpha=0.0)
+    config = json.loads((out_dir / "config.json").read_text(encoding="utf-8"))
+
+    assert out_dir.name == "character_character_svd_d2_a0"
+    assert config["alpha"] == pytest.approx(0.0)
+
+
+def test_remove_top_components_centers_and_reduces_dominant_direction() -> None:
+    embeddings = np.array(
+        [
+            [10.0, 1.0, 0.0],
+            [10.0, 0.9, 0.1],
+            [10.0, -1.0, 0.0],
+            [10.0, -0.9, -0.1],
+        ]
+    )
+
+    corrected, singular_values = _remove_top_components(embeddings, 1)
+
+    assert len(singular_values) == 1
+    assert np.allclose(corrected.mean(axis=0), 0.0, atol=1e-10)
+    assert np.linalg.norm(corrected[:, 1]) < np.linalg.norm((embeddings - embeddings.mean(axis=0))[:, 1])
+
+
+def test_drop_components_changes_default_output_dir_and_config(tmp_path) -> None:
+    processed = _write_processed_fixture(tmp_path)
+
+    assert (
+        default_embedding_dir(processed, "character-character", "svd", 2, drop_components=1).name
+        == "character_character_svd_d2_drop1"
+    )
+    assert (
+        default_embedding_dir(processed, "character-character", "svd", 2, alpha=0.0, drop_components=1).name
+        == "character_character_svd_d2_a0_drop1"
+    )
+
+    out_dir = build_svd_embeddings(processed, dim=2, seed=0, drop_components=1)
+    config = json.loads((out_dir / "config.json").read_text(encoding="utf-8"))
+
+    assert out_dir.name == "character_character_svd_d2_drop1"
+    assert config["drop_components"] == 1
+    assert config["mean_centered"] is True
+    assert len(config["dropped_component_singular_values"]) == 1
 
 
 def test_nearest_tags_excludes_self_and_missing_tag_errors(tmp_path) -> None:
@@ -145,6 +202,10 @@ def test_embedding_cli_smoke(tmp_path) -> None:
             str(processed),
             "--dim",
             "2",
+            "--alpha",
+            "0.0",
+            "--drop-components",
+            "1",
             "--seed",
             "0",
             "--out",

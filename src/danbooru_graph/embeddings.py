@@ -26,9 +26,26 @@ EMBEDDING_WEIGHT_COLUMNS = frozenset(
 SVD_SOLVERS = frozenset({"auto", "arpack", "lobpcg", "propack"})
 
 
-def default_embedding_dir(processed_dir: Path, pair: str, method: str, dim: int) -> Path:
+def _format_alpha(alpha: float) -> str:
+    return f"{alpha:g}".replace("-", "m").replace(".", "p")
+
+
+def default_embedding_dir(
+    processed_dir: Path,
+    pair: str,
+    method: str,
+    dim: int,
+    alpha: float = 0.5,
+    drop_components: int = 0,
+) -> Path:
     stem = pair.replace("-", "_")
-    return processed_dir / "embeddings" / f"{stem}_{method}_d{dim}"
+    suffix_parts = []
+    if not math.isclose(alpha, 0.5):
+        suffix_parts.append(f"a{_format_alpha(alpha)}")
+    if drop_components:
+        suffix_parts.append(f"drop{drop_components}")
+    suffix = "" if not suffix_parts else "_" + "_".join(suffix_parts)
+    return processed_dir / "embeddings" / f"{stem}_{method}_d{dim}{suffix}"
 
 
 def _validate_weight_column(weight_column: str) -> None:
@@ -102,6 +119,20 @@ def _normalize_rows(embeddings: np.ndarray) -> np.ndarray:
     return normalized
 
 
+def _remove_top_components(embeddings: np.ndarray, drop_components: int) -> tuple[np.ndarray, list[float]]:
+    """Mean-center embeddings and remove their top principal components."""
+    if drop_components <= 0:
+        return embeddings, []
+    if drop_components >= embeddings.shape[1]:
+        raise ValueError("drop_components must be smaller than the embedding dimension.")
+
+    centered = embeddings - embeddings.mean(axis=0, keepdims=True)
+    _, singular_values, vt = np.linalg.svd(centered, full_matrices=False)
+    components = vt[:drop_components]
+    corrected = centered - (centered @ components.T) @ components
+    return corrected, [float(value) for value in singular_values[:drop_components]]
+
+
 def _run_svds(matrix: csr_matrix, dim: int, seed: int, solver: str) -> tuple[np.ndarray, np.ndarray, str]:
     if solver not in SVD_SOLVERS:
         choices = ", ".join(sorted(SVD_SOLVERS))
@@ -130,6 +161,8 @@ def build_svd_embeddings(
     pair: str = "character-character",
     dim: int = 128,
     weight_column: str = "discounted_ppmi",
+    alpha: float = 0.5,
+    drop_components: int = 0,
     normalize: bool = True,
     seed: int = 42,
     solver: str = "auto",
@@ -141,6 +174,12 @@ def build_svd_embeddings(
         raise ValueError("SVD embedding v1 requires a same-category pair, such as character-character.")
     if dim < 1:
         raise ValueError("dim must be at least 1.")
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError("alpha must be between 0.0 and 1.0.")
+    if drop_components < 0:
+        raise ValueError("drop_components must be non-negative.")
+    if drop_components >= dim:
+        raise ValueError("drop_components must be smaller than dim.")
     _validate_weight_column(weight_column)
 
     vocab_path = processed_dir / "tag_vocab.parquet"
@@ -165,11 +204,21 @@ def build_svd_embeddings(
     order = np.argsort(singular_values)[::-1]
     singular_values = singular_values[order]
     u = u[:, order]
-    embeddings = u * np.sqrt(singular_values)[None, :]
+    embeddings = u * np.power(singular_values, alpha)[None, :]
+    dropped_component_singular_values: list[float] = []
+    if drop_components:
+        embeddings, dropped_component_singular_values = _remove_top_components(embeddings, drop_components)
     if normalize:
         embeddings = _normalize_rows(embeddings)
 
-    output_dir = out_dir or default_embedding_dir(processed_dir, pair, "svd", dim)
+    output_dir = out_dir or default_embedding_dir(
+        processed_dir,
+        pair,
+        "svd",
+        dim,
+        alpha=alpha,
+        drop_components=drop_components,
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     np.save(output_dir / "embeddings.npy", embeddings.astype(np.float32))
     vocab.write_parquet(output_dir / "embedding_vocab.parquet")
@@ -179,6 +228,10 @@ def build_svd_embeddings(
         "category": left_category,
         "dim": dim,
         "weight_column": weight_column,
+        "alpha": alpha,
+        "drop_components": drop_components,
+        "mean_centered": bool(drop_components),
+        "dropped_component_singular_values": dropped_component_singular_values,
         "normalize": normalize,
         "seed": seed,
         "requested_solver": solver,

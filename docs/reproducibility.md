@@ -92,6 +92,41 @@ danbooru-graph similarity-tags `
   --tag-b "karin_(blue_archive)"
 ```
 
+The `--alpha` parameter controls singular-value scaling. The default
+`--alpha 0.5` uses `U * sqrt(S)`. To test whether removing singular-value
+magnitude improves motif separation, run:
+
+```powershell
+danbooru-graph build-embeddings `
+  --processed data/processed `
+  --pair character-character `
+  --method svd `
+  --dim 128 `
+  --alpha 0.0
+
+danbooru-graph similarity-tags `
+  --embeddings data/processed/embeddings/character_character_svd_d128_a0 `
+  --tag-a "asuna_(blue_archive)" `
+  --tag-b "karin_(blue_archive)"
+```
+
+For All-but-the-top post-processing, remove dominant dense components after
+mean-centering:
+
+```powershell
+danbooru-graph build-embeddings `
+  --processed data/processed `
+  --pair character-character `
+  --method svd `
+  --dim 128 `
+  --drop-components 3
+
+danbooru-graph similarity-tags `
+  --embeddings data/processed/embeddings/character_character_svd_d128_drop3 `
+  --tag-a "asuna_(blue_archive)" `
+  --tag-b "karin_(blue_archive)"
+```
+
 The generated `embeddings.npy`, `embedding_vocab.parquet`, and `config.json`
 stay under ignored `data/processed/`.
 

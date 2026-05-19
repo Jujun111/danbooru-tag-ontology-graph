@@ -344,6 +344,19 @@ def build_embeddings(
         "--weight-column",
         help=f"Scored edge weight. One of: {', '.join(sorted(EMBEDDING_WEIGHT_COLUMNS))}.",
     ),
+    alpha: float = typer.Option(
+        0.5,
+        "--alpha",
+        min=0.0,
+        max=1.0,
+        help="Singular-value exponent. 0.5 uses U * sqrt(S); 0.0 uses U only.",
+    ),
+    drop_components: int = typer.Option(
+        0,
+        "--drop-components",
+        min=0,
+        help="All-but-the-top post-processing: mean-center and remove the top N dense components.",
+    ),
     seed: int = typer.Option(42, "--seed", help="Deterministic SVD seed."),
     solver: str = typer.Option(
         "auto",
@@ -364,6 +377,8 @@ def build_embeddings(
         pair=pair,
         dim=dim,
         weight_column=weight_column,
+        alpha=alpha,
+        drop_components=drop_components,
         normalize=normalize,
         seed=seed,
         solver=solver,

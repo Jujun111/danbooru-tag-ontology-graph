@@ -123,6 +123,14 @@ danbooru-graph nearest-tags --embeddings data/processed/embeddings/character_cha
 danbooru-graph similarity-tags --embeddings data/processed/embeddings/character_character_svd_d128 --tag-a "asuna_(blue_archive)" --tag-b "karin_(blue_archive)"
 ```
 
+Use `--alpha` to tune singular-value scaling. The default `--alpha 0.5` uses
+`U * sqrt(S)`, while `--alpha 0.0` uses pure `U` and writes to
+`character_character_svd_d128_a0` by default.
+
+Use `--drop-components N` for All-but-the-top post-processing. When `N > 0`,
+the dense embeddings are mean-centered and the top `N` principal components are
+removed before row normalization.
+
 Detect communities and evaluate them against held-out copyright labels:
 
 ```powershell
