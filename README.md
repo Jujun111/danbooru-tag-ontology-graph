@@ -174,6 +174,7 @@ danbooru-graph query-characters --include-general "dark-skinned_male,dark-skinne
 - [Architecture](docs/architecture.md)
 - [Prompt recommendation design](docs/prompt_recommendation.md)
 - [Reproducibility guide](docs/reproducibility.md)
+- [Academic report draft](reports/academic_report_draft.md)
 - [Phase 4 semantic topology report](reports/phase4_semantic_topology.md)
 - [Research outline](reports/research_outline.md)
 
