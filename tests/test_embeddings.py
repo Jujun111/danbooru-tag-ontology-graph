@@ -13,6 +13,7 @@ from danbooru_graph.embeddings import (
     build_svd_embeddings,
     build_symmetric_weight_matrix,
     default_embedding_dir,
+    diagnose_embedding_graph,
     _remove_top_components,
 )
 
@@ -199,6 +200,34 @@ def test_edge_filtering_updates_config_and_matrix_density(tmp_path) -> None:
     assert config["matrix_nnz"] == 4
 
 
+def test_diagnose_embedding_graph_reports_filter_structure(tmp_path) -> None:
+    processed = _write_processed_fixture(tmp_path)
+
+    diagnostics = diagnose_embedding_graph(
+        processed,
+        min_npmi=0.7,
+        min_co_count=40,
+        target_tags=["a", "c", "missing"],
+        top_components=2,
+    )
+
+    assert diagnostics["source_edge_count"] == 4
+    assert diagnostics["filtered_edge_count"] == 2
+    assert diagnostics["matrix_nnz"] == 4
+    assert diagnostics["retained_node_count"] == 4
+    assert diagnostics["isolated_node_count"] == 0
+    assert diagnostics["degree"]["active_min"] == 1
+    assert diagnostics["degree"]["active_max"] == 1
+    assert diagnostics["component_count"] == 2
+    assert diagnostics["largest_component_sizes"] == [2, 2]
+    assert diagnostics["target_tags"] == [
+        {"tag": "a", "status": "active", "degree": 1, "component_size": 2},
+        {"tag": "c", "status": "active", "degree": 1, "component_size": 2},
+        {"tag": "missing", "status": "missing", "degree": None, "component_size": None},
+    ]
+    assert diagnostics["isolated_target_tags"] == ["missing"]
+
+
 def test_nearest_tags_excludes_self_and_missing_tag_errors(tmp_path) -> None:
     embeddings_dir = _write_manual_embedding_dir(tmp_path)
     index = TagEmbeddingIndex.from_dir(embeddings_dir)
@@ -258,6 +287,25 @@ def test_embedding_cli_smoke(tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert (out_dir / "embeddings.npy").exists()
+
+    result = runner.invoke(
+        app,
+        [
+            "diagnose-embedding-graph",
+            "--processed",
+            str(processed),
+            "--min-npmi",
+            "0.7",
+            "--min-co-count",
+            "40",
+            "--tags",
+            "a,c",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "filtered=2" in result.output
+    assert "largest=[2, 2]" in result.output
+    assert "a: status=active degree=1 component_size=2" in result.output
 
     result = runner.invoke(
         app,

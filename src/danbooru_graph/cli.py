@@ -22,6 +22,7 @@ from danbooru_graph.embeddings import (
     SVD_SOLVERS,
     TagEmbeddingIndex,
     build_svd_embeddings as build_svd_embeddings_pipeline,
+    diagnose_embedding_graph as diagnose_embedding_graph_pipeline,
 )
 from danbooru_graph.recommendation import (
     DEFAULT_COMMUNITIES_PATH,
@@ -402,6 +403,79 @@ def build_embeddings(
         out_dir=out,
     )
     typer.echo(f"Wrote SVD embeddings to {out_dir}")
+
+
+@app.command("diagnose-embedding-graph")
+def diagnose_embedding_graph(
+    processed: Path = typer.Option(..., "--processed", help="Processed directory."),
+    pair: str = typer.Option("character-character", "--pair", help="Same-category pair, e.g. character-character."),
+    min_npmi: float | None = typer.Option(
+        None,
+        "--min-npmi",
+        min=-1.0,
+        max=1.0,
+        help="Filter scored edges to NPMI >= this value before diagnostics.",
+    ),
+    min_co_count: int | None = typer.Option(
+        None,
+        "--min-co-count",
+        min=1,
+        help="Filter scored edges to co_count >= this value before diagnostics.",
+    ),
+    tags: str | None = typer.Option(None, "--tags", help="Comma-separated target tags to inspect."),
+    weight_column: str = typer.Option(
+        "discounted_ppmi",
+        "--weight-column",
+        help=f"Scored edge weight. One of: {', '.join(sorted(EMBEDDING_WEIGHT_COLUMNS))}.",
+    ),
+    top_components: int = typer.Option(10, "--top-components", min=1, help="Largest component sizes to print."),
+    json_output: bool = typer.Option(False, "--json", help="Emit full JSON instead of text."),
+) -> None:
+    if weight_column not in EMBEDDING_WEIGHT_COLUMNS:
+        raise typer.BadParameter(f"--weight-column must be one of: {', '.join(sorted(EMBEDDING_WEIGHT_COLUMNS))}.")
+    selected_tags = parse_tags(tags or "")
+    diagnostics = diagnose_embedding_graph_pipeline(
+        processed,
+        pair=pair,
+        min_npmi=min_npmi,
+        min_co_count=min_co_count,
+        target_tags=selected_tags,
+        weight_column=weight_column,
+        top_components=top_components,
+    )
+    if json_output:
+        typer.echo(json.dumps(diagnostics, ensure_ascii=False, indent=2))
+        return
+
+    degree = diagnostics["degree"]
+    typer.echo(f"pair={diagnostics['pair']} weight={diagnostics['weight_column']}")
+    typer.echo(f"filters: min_npmi={diagnostics['min_npmi']} min_co_count={diagnostics['min_co_count']}")
+    typer.echo(
+        "edges: "
+        f"source={diagnostics['source_edge_count']} filtered={diagnostics['filtered_edge_count']} "
+        f"matrix_nnz={diagnostics['matrix_nnz']}"
+    )
+    typer.echo(
+        "nodes: "
+        f"total={diagnostics['num_tags']} retained={diagnostics['retained_node_count']} "
+        f"isolated={diagnostics['isolated_node_count']}"
+    )
+    typer.echo(
+        "degree(active): "
+        f"min={degree['active_min']} median={degree['active_median']:.2f} "
+        f"mean={degree['active_mean']:.2f} p90={degree['active_p90']:.2f} max={degree['active_max']}"
+    )
+    typer.echo(
+        "components: "
+        f"count={diagnostics['component_count']} largest={diagnostics['largest_component_sizes']}"
+    )
+    if diagnostics["target_tags"]:
+        typer.echo("targets:")
+        for item in diagnostics["target_tags"]:
+            typer.echo(
+                f"- {item['tag']}: status={item['status']} "
+                f"degree={item['degree']} component_size={item['component_size']}"
+            )
 
 
 @app.command("nearest-tags")

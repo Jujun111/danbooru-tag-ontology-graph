@@ -24,6 +24,42 @@ parked
 
 ## Done / investigated
 
+### T003-diagnostics: Add embedding graph diagnostics
+
+Finding:
+Added `diagnose-embedding-graph` to inspect the exact filtered graph used before SVD factorization.
+The command reports retained edges, retained nodes, isolated target tags, active-degree statistics, and largest connected component sizes.
+
+Acceptance criteria:
+- CLI accepts `--min-npmi` and `--min-co-count`
+- CLI accepts comma-separated `--tags`
+- reports degree statistics and connected component sizes
+- core diagnostic logic is tested
+
+Baseline-style filter (`min_npmi=0.15`, `min_co_count=15`):
+- Filtered edges: 346,014 from 837,806
+- Retained nodes: 24,764 / 28,682
+- Isolated nodes: 3,918
+- Components: 1,636
+- Largest component sizes: `[17416, 99, 95, 75, 65, 55, 51, 51, 49, 48]`
+- BA probe: Asuna, Karin, Neru, Hina, and Akane all remain in the giant 17,416-node component
+- Target degrees: Asuna 67, Karin 81, Neru 108, Hina 124, Akane 90
+
+Strict filter (`min_npmi=0.50`, `min_co_count=25`):
+- Filtered edges: 98,793 from 837,806
+- Retained nodes: 22,326 / 28,682
+- Isolated nodes: 6,356
+- Components: 2,329
+- Largest component sizes: `[4850, 1661, 572, 451, 377, 289, 288, 276, 225, 189]`
+- BA probe: Asuna and Hina become isolated; Karin, Neru, and Akane fall into a 12-node component
+- Target degrees: Asuna 0, Karin 4, Neru 4, Hina 0, Akane 7
+
+Interpretation:
+The earlier strict-filter cosine behavior is a graph fragmentation artifact. The mild graph is still dominated by a giant component, while the strict graph isolates high-profile hubs and creates tiny components whose SVD vectors can become degenerate.
+
+Status:
+done
+
 ### T003: Add edge filtering before factorization
 
 Finding:

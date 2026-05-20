@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import polars as pl
 from scipy.sparse import coo_matrix, csr_matrix
+from scipy.sparse.csgraph import connected_components
 from scipy.sparse.linalg import svds
 
 from danbooru_graph.pairs import edge_file_stem, parse_pair
@@ -62,6 +63,13 @@ def _validate_weight_column(weight_column: str) -> None:
     if weight_column not in EMBEDDING_WEIGHT_COLUMNS:
         choices = ", ".join(sorted(EMBEDDING_WEIGHT_COLUMNS))
         raise ValueError(f"Unknown embedding weight {weight_column!r}; expected one of: {choices}.")
+
+
+def _validate_edge_filters(min_npmi: float | None = None, min_co_count: int | None = None) -> None:
+    if min_npmi is not None and not -1.0 <= min_npmi <= 1.0:
+        raise ValueError("min_npmi must be between -1.0 and 1.0.")
+    if min_co_count is not None and min_co_count < 1:
+        raise ValueError("min_co_count must be at least 1.")
 
 
 def _embedding_vocab(vocab: pl.DataFrame, category: str) -> pl.DataFrame:
@@ -119,6 +127,147 @@ def build_symmetric_weight_matrix(
     matrix.setdiag(0.0)
     matrix.eliminate_zeros()
     return matrix
+
+
+def _filtered_same_category_edges(
+    processed_dir: Path,
+    pair: str,
+    min_npmi: float | None = None,
+    min_co_count: int | None = None,
+) -> tuple[pl.DataFrame, pl.DataFrame, dict[str, Any]]:
+    left_category, right_category = parse_pair(pair)
+    if left_category != right_category:
+        raise ValueError("Embedding graph diagnostics require a same-category pair, such as character-character.")
+    _validate_edge_filters(min_npmi=min_npmi, min_co_count=min_co_count)
+
+    vocab_path = processed_dir / "tag_vocab.parquet"
+    edges_path = processed_dir / f"{edge_file_stem(pair)}.parquet"
+    if not vocab_path.exists():
+        raise FileNotFoundError(f"Missing tag vocabulary: {vocab_path}")
+    if not edges_path.exists():
+        raise FileNotFoundError(f"Missing scored edge table: {edges_path}")
+
+    vocab = _embedding_vocab(pl.read_parquet(vocab_path), left_category)
+    edges = pl.read_parquet(edges_path)
+    if "category_a" in edges.columns and "category_b" in edges.columns:
+        edges = edges.filter((pl.col("category_a") == left_category) & (pl.col("category_b") == right_category))
+    source_edge_count = edges.height
+    if min_npmi is not None:
+        edges = edges.filter(pl.col("npmi") >= min_npmi)
+    if min_co_count is not None:
+        edges = edges.filter(pl.col("co_count") >= min_co_count)
+    metadata = {
+        "pair": pair,
+        "category": left_category,
+        "min_npmi": min_npmi,
+        "min_co_count": min_co_count,
+        "source_edge_count": source_edge_count,
+        "filtered_edge_count": edges.height,
+        "source_edges": str(edges_path),
+        "source_vocab": str(vocab_path),
+    }
+    return vocab, edges, metadata
+
+
+def _degree_summary(degrees: np.ndarray) -> dict[str, float | int]:
+    active_degrees = degrees[degrees > 0]
+    if active_degrees.size == 0:
+        return {
+            "active_min": 0,
+            "active_max": 0,
+            "active_mean": 0.0,
+            "active_median": 0.0,
+            "active_p90": 0.0,
+        }
+    return {
+        "active_min": int(active_degrees.min()),
+        "active_max": int(active_degrees.max()),
+        "active_mean": float(active_degrees.mean()),
+        "active_median": float(np.median(active_degrees)),
+        "active_p90": float(np.percentile(active_degrees, 90)),
+    }
+
+
+def diagnose_embedding_graph(
+    processed_dir: Path,
+    pair: str = "character-character",
+    min_npmi: float | None = None,
+    min_co_count: int | None = None,
+    target_tags: list[str] | None = None,
+    weight_column: str = "discounted_ppmi",
+    top_components: int = 10,
+) -> dict[str, Any]:
+    """Summarize the sparse graph that would be factorized by SVD."""
+    if top_components < 1:
+        raise ValueError("top_components must be at least 1.")
+    _validate_weight_column(weight_column)
+    vocab, edges, metadata = _filtered_same_category_edges(
+        processed_dir,
+        pair,
+        min_npmi=min_npmi,
+        min_co_count=min_co_count,
+    )
+    matrix = build_symmetric_weight_matrix(edges, vocab, weight_column=weight_column)
+    degrees = np.asarray(matrix.getnnz(axis=1)).astype(np.int64, copy=False)
+    retained_node_count = int(np.count_nonzero(degrees))
+    isolated_node_count = int(vocab.height - retained_node_count)
+
+    active_mask = degrees > 0
+    if retained_node_count:
+        active_indices = np.flatnonzero(active_mask)
+        active_matrix = matrix[active_indices][:, active_indices]
+        component_count, labels = connected_components(active_matrix, directed=False, return_labels=True)
+        component_sizes = np.bincount(labels).astype(np.int64)
+        largest_component_sizes = sorted((int(value) for value in component_sizes), reverse=True)[:top_components]
+        component_label_by_embedding_idx = {
+            int(embedding_idx): int(label)
+            for embedding_idx, label in zip(active_indices, labels)
+        }
+    else:
+        component_count = 0
+        component_sizes = np.array([], dtype=np.int64)
+        largest_component_sizes = []
+        component_label_by_embedding_idx = {}
+
+    vocab_rows = vocab.select("embedding_idx", "tag_id", "tag").to_dicts()
+    row_by_tag = {row["tag"]: row for row in vocab_rows}
+    target_reports = []
+    isolated_targets = []
+    for tag in target_tags or []:
+        if tag not in row_by_tag:
+            target_reports.append({"tag": tag, "status": "missing", "degree": None, "component_size": None})
+            isolated_targets.append(tag)
+            continue
+        row = row_by_tag[tag]
+        embedding_idx = int(row["embedding_idx"])
+        degree = int(degrees[embedding_idx])
+        if degree == 0:
+            target_reports.append({"tag": tag, "status": "isolated", "degree": 0, "component_size": 0})
+            isolated_targets.append(tag)
+            continue
+        component_label = component_label_by_embedding_idx[embedding_idx]
+        target_reports.append(
+            {
+                "tag": tag,
+                "status": "active",
+                "degree": degree,
+                "component_size": int(component_sizes[component_label]),
+            }
+        )
+
+    return {
+        **metadata,
+        "weight_column": weight_column,
+        "num_tags": vocab.height,
+        "matrix_nnz": int(matrix.nnz),
+        "retained_node_count": retained_node_count,
+        "isolated_node_count": isolated_node_count,
+        "degree": _degree_summary(degrees),
+        "component_count": int(component_count),
+        "largest_component_sizes": largest_component_sizes,
+        "target_tags": target_reports,
+        "isolated_target_tags": isolated_targets,
+    }
 
 
 def _normalize_rows(embeddings: np.ndarray) -> np.ndarray:
@@ -192,32 +341,17 @@ def build_svd_embeddings(
         raise ValueError("drop_components must be non-negative.")
     if drop_components >= dim:
         raise ValueError("drop_components must be smaller than dim.")
-    if min_npmi is not None and not -1.0 <= min_npmi <= 1.0:
-        raise ValueError("min_npmi must be between -1.0 and 1.0.")
-    if min_co_count is not None and min_co_count < 1:
-        raise ValueError("min_co_count must be at least 1.")
+    _validate_edge_filters(min_npmi=min_npmi, min_co_count=min_co_count)
     _validate_weight_column(weight_column)
 
-    vocab_path = processed_dir / "tag_vocab.parquet"
-    edges_path = processed_dir / f"{edge_file_stem(pair)}.parquet"
-    if not vocab_path.exists():
-        raise FileNotFoundError(f"Missing tag vocabulary: {vocab_path}")
-    if not edges_path.exists():
-        raise FileNotFoundError(f"Missing scored edge table: {edges_path}")
-
-    vocab = _embedding_vocab(pl.read_parquet(vocab_path), left_category)
+    vocab, edges, edge_metadata = _filtered_same_category_edges(
+        processed_dir,
+        pair,
+        min_npmi=min_npmi,
+        min_co_count=min_co_count,
+    )
     if dim >= vocab.height:
         raise ValueError(f"dim must be smaller than the number of tags ({vocab.height}).")
-
-    edges = pl.read_parquet(edges_path)
-    if "category_a" in edges.columns and "category_b" in edges.columns:
-        edges = edges.filter((pl.col("category_a") == left_category) & (pl.col("category_b") == right_category))
-    source_edge_count = edges.height
-    if min_npmi is not None:
-        edges = edges.filter(pl.col("npmi") >= min_npmi)
-    if min_co_count is not None:
-        edges = edges.filter(pl.col("co_count") >= min_co_count)
-    filtered_edge_count = edges.height
     matrix = build_symmetric_weight_matrix(edges, vocab, weight_column=weight_column)
     if matrix.nnz == 0:
         raise ValueError("Cannot build embeddings from an empty sparse matrix.")
@@ -256,8 +390,8 @@ def build_svd_embeddings(
         "drop_components": drop_components,
         "min_npmi": min_npmi,
         "min_co_count": min_co_count,
-        "source_edge_count": source_edge_count,
-        "filtered_edge_count": filtered_edge_count,
+        "source_edge_count": edge_metadata["source_edge_count"],
+        "filtered_edge_count": edge_metadata["filtered_edge_count"],
         "mean_centered": bool(drop_components),
         "dropped_component_singular_values": dropped_component_singular_values,
         "normalize": normalize,
@@ -267,8 +401,8 @@ def build_svd_embeddings(
         "num_tags": vocab.height,
         "matrix_nnz": int(matrix.nnz),
         "singular_values": [float(value) for value in singular_values],
-        "source_edges": str(edges_path),
-        "source_vocab": str(vocab_path),
+        "source_edges": edge_metadata["source_edges"],
+        "source_vocab": edge_metadata["source_vocab"],
     }
     (output_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     return output_dir
