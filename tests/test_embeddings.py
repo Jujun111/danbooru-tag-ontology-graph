@@ -333,20 +333,50 @@ def test_neighbor_case_study_labels_and_exports(tmp_path) -> None:
     assert records[0]["same_base"] is True
     assert records[1]["same_franchise"] is True
 
+    domain_labels_path = tmp_path / "domain_labels.json"
+    domain_labels_path.write_text(
+        json.dumps(
+            {
+                "labels": {
+                    "asuna": {"franchise": "blue_archive", "school": "Millennium", "club": "C&C"},
+                    "karin": {"franchise": "blue_archive", "school": "Millennium", "club": "C&C"},
+                    "amiya": {"franchise": "arknights", "school": "Rhodes Island", "club": "Leadership"},
+                    "asuna_(bunny)_(blue_archive)": {"event": "Bunny Chasers on Board"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    enriched = neighbor_case_study_records(
+        embeddings_dir,
+        ["asuna_(blue_archive)"],
+        top_k=3,
+        domain_labels_path=domain_labels_path,
+    )
+
+    assert enriched[0]["neighbor_event"] == "Bunny Chasers on Board"
+    assert enriched[1]["domain_relation"] == "same-club"
+    assert enriched[2]["domain_relation"] == "different-domain"
+
     csv_path, markdown_path, exported = export_neighbor_case_studies(
         embeddings_dir,
         ["asuna_(blue_archive)"],
         tmp_path / "case_study",
         top_k=3,
+        domain_labels_path=domain_labels_path,
     )
 
-    assert exported == records
+    assert exported == enriched
     assert csv_path.exists()
     assert markdown_path.exists()
-    assert "query_tag,rank,neighbor,score,label" in csv_path.read_text(encoding="utf-8")
+    csv_text = csv_path.read_text(encoding="utf-8")
+    assert "query_tag,rank,neighbor,score,label" in csv_text
+    assert "domain_relation" in csv_text
     markdown = markdown_path.read_text(encoding="utf-8")
     assert "## `asuna_(blue_archive)`" in markdown
     assert "`asuna_(bunny)_(blue_archive)`" in markdown
+    assert "| variant | same-club |" in markdown
+    assert "| same-franchise | same-club |" in markdown
 
 
 def test_similarity_matrix_is_symmetric_and_ordered(tmp_path) -> None:
@@ -493,6 +523,31 @@ def test_embedding_cli_smoke(tmp_path) -> None:
             str(tmp_path / "neighbors"),
             "--top-k",
             "2",
+            "--domain-labels",
+            str(tmp_path / "missing_labels.json"),
+        ],
+    )
+    assert result.exit_code != 0
+
+    domain_labels_path = tmp_path / "cli_domain_labels.json"
+    domain_labels_path.write_text(
+        json.dumps({"a": {"franchise": "demo", "school": "school", "club": "club"}}),
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "export-neighbor-case-studies",
+            "--embeddings",
+            str(manual_embeddings),
+            "--tags",
+            "a,b",
+            "--out",
+            str(tmp_path / "neighbors"),
+            "--top-k",
+            "2",
+            "--domain-labels",
+            str(domain_labels_path),
         ],
     )
     assert result.exit_code == 0, result.output

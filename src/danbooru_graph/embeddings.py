@@ -128,6 +128,51 @@ def label_neighbor_relation(query_tag: str, neighbor_tag: str) -> dict[str, Any]
     }
 
 
+def load_domain_label_map(path: Path) -> dict[str, dict[str, str]]:
+    """Load an optional flat JSON domain-label map keyed by base or full tag."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    labels = raw.get("labels", raw)
+    if not isinstance(labels, dict):
+        raise ValueError("Domain label JSON must contain an object or a top-level 'labels' object.")
+
+    normalized = {}
+    for tag, values in labels.items():
+        if not isinstance(values, dict):
+            raise ValueError(f"Domain labels for {tag!r} must be an object.")
+        normalized[str(tag)] = {
+            key: str(value)
+            for key, value in values.items()
+            if key in {"franchise", "school", "club", "event"} and value not in {None, ""}
+        }
+    return normalized
+
+
+def _domain_for_tag(tag: str, domain_labels: dict[str, dict[str, str]]) -> dict[str, str | None]:
+    values = {
+        "franchise": None,
+        "school": None,
+        "club": None,
+        "event": None,
+    }
+    values.update(domain_labels.get(_tag_base(tag), {}))
+    values.update(domain_labels.get(tag, {}))
+    return values
+
+
+def _domain_relation(query_domain: dict[str, str | None], neighbor_domain: dict[str, str | None]) -> str:
+    if not any(query_domain.values()) or not any(neighbor_domain.values()):
+        return "unknown-domain"
+    if query_domain["event"] and query_domain["event"] == neighbor_domain["event"]:
+        return "same-event"
+    if query_domain["club"] and query_domain["club"] == neighbor_domain["club"]:
+        return "same-club"
+    if query_domain["school"] and query_domain["school"] == neighbor_domain["school"]:
+        return "same-school"
+    if query_domain["franchise"] and query_domain["franchise"] == neighbor_domain["franchise"]:
+        return "same-franchise-domain"
+    return "different-domain"
+
+
 def _embedding_vocab(vocab: pl.DataFrame, category: str) -> pl.DataFrame:
     selected = vocab.filter(pl.col("category") == category).sort("tag_id")
     if selected.is_empty():
@@ -719,6 +764,7 @@ def neighbor_case_study_records(
     embeddings_dir: Path,
     tags: list[str],
     top_k: int = 20,
+    domain_labels_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     if not tags:
         raise ValueError("At least one tag is required.")
@@ -726,25 +772,39 @@ def neighbor_case_study_records(
         raise ValueError("top_k must be at least 1.")
 
     index = TagEmbeddingIndex.from_dir(embeddings_dir)
+    domain_labels = load_domain_label_map(domain_labels_path) if domain_labels_path is not None else None
     records = []
     for query_tag in tags:
         for item in index.nearest(query_tag, top_k=top_k):
             labels = label_neighbor_relation(query_tag, item["tag"])
-            records.append(
-                {
-                    "query_tag": query_tag,
-                    "rank": int(item["rank"]),
-                    "neighbor": item["tag"],
-                    "score": float(item["score"]),
-                    "label": labels["label"],
-                    "query_base": labels["query_base"],
-                    "neighbor_base": labels["neighbor_base"],
-                    "query_franchise": labels["query_franchise"],
-                    "neighbor_franchise": labels["neighbor_franchise"],
-                    "same_base": labels["same_base"],
-                    "same_franchise": labels["same_franchise"],
-                }
-            )
+            record = {
+                "query_tag": query_tag,
+                "rank": int(item["rank"]),
+                "neighbor": item["tag"],
+                "score": float(item["score"]),
+                "label": labels["label"],
+                "query_base": labels["query_base"],
+                "neighbor_base": labels["neighbor_base"],
+                "query_franchise": labels["query_franchise"],
+                "neighbor_franchise": labels["neighbor_franchise"],
+                "same_base": labels["same_base"],
+                "same_franchise": labels["same_franchise"],
+            }
+            if domain_labels is not None:
+                query_domain = _domain_for_tag(query_tag, domain_labels)
+                neighbor_domain = _domain_for_tag(item["tag"], domain_labels)
+                record.update(
+                    {
+                        "query_school": query_domain["school"],
+                        "query_club": query_domain["club"],
+                        "query_event": query_domain["event"],
+                        "neighbor_school": neighbor_domain["school"],
+                        "neighbor_club": neighbor_domain["club"],
+                        "neighbor_event": neighbor_domain["event"],
+                        "domain_relation": _domain_relation(query_domain, neighbor_domain),
+                    }
+                )
+            records.append(record)
     return records
 
 
@@ -757,8 +817,9 @@ def export_neighbor_case_studies(
     tags: list[str],
     out_stem: Path,
     top_k: int = 20,
+    domain_labels_path: Path | None = None,
 ) -> tuple[Path, Path, list[dict[str, Any]]]:
-    records = neighbor_case_study_records(embeddings_dir, tags, top_k=top_k)
+    records = neighbor_case_study_records(embeddings_dir, tags, top_k=top_k, domain_labels_path=domain_labels_path)
     out_stem.parent.mkdir(parents=True, exist_ok=True)
     csv_path = out_stem.with_suffix(".csv")
     markdown_path = out_stem.with_suffix(".md")
@@ -776,6 +837,18 @@ def export_neighbor_case_studies(
         "same_base",
         "same_franchise",
     ]
+    if domain_labels_path is not None:
+        columns.extend(
+            [
+                "query_school",
+                "query_club",
+                "query_event",
+                "neighbor_school",
+                "neighbor_club",
+                "neighbor_event",
+                "domain_relation",
+            ]
+        )
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
         writer.writeheader()
@@ -789,26 +862,34 @@ def export_neighbor_case_studies(
         "",
         f"Embedding artifact: `{embeddings_dir}`",
         f"Top K: {top_k}",
-        "",
     ]
+    if domain_labels_path is not None:
+        lines.append(f"Domain labels: `{domain_labels_path}`")
+    lines.append("")
     for query_tag in tags:
         query_records = [record for record in records if record["query_tag"] == query_tag]
+        has_domain = domain_labels_path is not None
         lines.extend(
             [
                 f"## `{query_tag}`",
                 "",
-                "| Rank | Neighbor | Score | Label |",
-                "| ---: | --- | ---: | --- |",
+                "| Rank | Neighbor | Score | Label | Domain Relation |"
+                if has_domain
+                else "| Rank | Neighbor | Score | Label |",
+                "| ---: | --- | ---: | --- | --- |" if has_domain else "| ---: | --- | ---: | --- |",
             ]
         )
         for record in query_records:
-            lines.append(
+            row = (
                 "| "
                 f"{record['rank']} | "
                 f"`{_markdown_escape(record['neighbor'])}` | "
                 f"{record['score']:.6f} | "
                 f"{record['label']} |"
             )
+            if has_domain:
+                row = row[:-1] + f"| {record['domain_relation']} |"
+            lines.append(row)
         lines.append("")
 
     markdown_path.write_text("\n".join(lines), encoding="utf-8")

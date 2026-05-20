@@ -6,7 +6,7 @@ Can character-character graph embeddings separate fine-grained Blue Archive moti
 
 ## Active
 
-No active task after nearest-neighbor case study export.
+No active task after BA domain-label enrichment.
 
 ## Next
 
@@ -23,6 +23,35 @@ Status:
 parked
 
 ## Done / investigated
+
+### T009: Add BA domain-label enrichment for neighbor case studies
+
+Finding:
+Added optional domain-label enrichment for embedding nearest-neighbor case studies.
+The exporter can now load a local JSON mapping keyed by base tags or full variant tags and append school, club, event, and domain-relation fields to CSV and Markdown outputs.
+
+Command:
+`danbooru-graph export-neighbor-case-studies --embeddings data/processed/embeddings/character_item2vec_d128 --tags "asuna_(blue_archive),karin_(blue_archive),neru_(blue_archive),hina_(blue_archive),akane_(blue_archive)" --out data/processed/evaluation/item2vec_ba_neighbor_case_studies_domain --top-k 20 --domain-labels docs/domain_labels/blue_archive_character_domains.json`
+
+Tracked mapping:
+`docs/domain_labels/blue_archive_character_domains.json`
+
+Generated artifacts:
+- `data/processed/evaluation/item2vec_ba_neighbor_case_studies_domain.csv`
+- `data/processed/evaluation/item2vec_ba_neighbor_case_studies_domain.md`
+
+Domain-relation counts:
+- Asuna: 13 same-club, 2 same-school, 2 same-franchise-domain, 3 unknown-domain
+- Karin: 14 same-club, 2 same-school, 2 same-franchise-domain, 2 unknown-domain
+- Neru: 14 same-club, 3 same-franchise-domain, 3 unknown-domain
+- Hina: 7 same-club, 6 same-school, 2 same-franchise-domain, 5 unknown-domain
+- Akane: 13 same-club, 1 same-school, 5 same-franchise-domain, 1 unknown-domain
+
+Interpretation:
+The enriched export makes the C&C vs Gehenna separation more explicit. Asuna/Karin/Neru/Akane have mostly same-club neighbors, while Hina's neighbor set is still Blue Archive but spreads across Gehenna/Prefect-Team-adjacent labels rather than C&C. Remaining unknown-domain rows mostly reflect unmapped or cross-IP analogue tags.
+
+Status:
+done
 
 ### T008: Export embedding nearest-neighbor case studies
 

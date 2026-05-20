@@ -547,6 +547,11 @@ def export_neighbor_case_studies(
     tags: str = typer.Option(..., "--tags", help="Comma-separated query tags."),
     out: Path = typer.Option(..., "--out", help="Output stem; writes .csv and .md files."),
     top_k: int = typer.Option(20, "--top-k", min=1),
+    domain_labels: Path | None = typer.Option(
+        None,
+        "--domain-labels",
+        help="Optional JSON mapping from tags/base tags to school, club, and event labels.",
+    ),
 ) -> None:
     selected_tags = parse_tags(tags)
     if not selected_tags:
@@ -556,6 +561,7 @@ def export_neighbor_case_studies(
         selected_tags,
         out,
         top_k=top_k,
+        domain_labels_path=domain_labels,
     )
     typer.echo(f"Wrote {len(records)} nearest-neighbor rows to {csv_path}")
     typer.echo(f"Wrote Markdown case study to {markdown_path}")

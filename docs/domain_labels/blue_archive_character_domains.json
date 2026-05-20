@@ -1,0 +1,160 @@
+{
+  "labels": {
+    "akane": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "C&C"
+    },
+    "akane_(bunny)_(blue_archive)": {
+      "event": "Bunny Chasers on Board"
+    },
+    "akane_(school_uniform)_(blue_archive)": {
+      "event": "C&C school uniform motif"
+    },
+    "ako": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "Prefect Team"
+    },
+    "android": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "C&C"
+    },
+    "asuna": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "C&C"
+    },
+    "asuna_(bunny)_(blue_archive)": {
+      "event": "Bunny Chasers on Board"
+    },
+    "asuna_(school_uniform)_(blue_archive)": {
+      "event": "C&C school uniform motif"
+    },
+    "avant_garde": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "C&C"
+    },
+    "chinatsu": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "Prefect Team"
+    },
+    "female_sensei": {
+      "franchise": "blue_archive",
+      "school": "Schale",
+      "club": "Sensei"
+    },
+    "hina": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "Prefect Team"
+    },
+    "hina_(pajamas)_(blue_archive)": {
+      "event": "Hina pajama motif"
+    },
+    "hoshino": {
+      "franchise": "blue_archive",
+      "school": "Abydos",
+      "club": "Foreclosure Task Force"
+    },
+    "ibuki": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "Pandemonium Society"
+    },
+    "iori": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "Prefect Team"
+    },
+    "izumi": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "Gourmet Research Society"
+    },
+    "karin": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "C&C"
+    },
+    "karin_(bunny)_(blue_archive)": {
+      "event": "Bunny Chasers on Board"
+    },
+    "karin_(school_uniform)_(blue_archive)": {
+      "event": "C&C school uniform motif"
+    },
+    "kasumi": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "Hot Springs Development Department"
+    },
+    "kirara": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "unknown"
+    },
+    "koyuki": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "Seminar"
+    },
+    "makoto": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "Pandemonium Society"
+    },
+    "mirai": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "C&C"
+    },
+    "neru": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "C&C"
+    },
+    "neru_(bunny)_(blue_archive)": {
+      "event": "Bunny Chasers on Board"
+    },
+    "neru_(school_uniform)_(blue_archive)": {
+      "event": "C&C school uniform motif"
+    },
+    "prefect_team_member": {
+      "franchise": "blue_archive",
+      "school": "Gehenna",
+      "club": "Prefect Team"
+    },
+    "rio": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "Seminar"
+    },
+    "sukeban": {
+      "franchise": "blue_archive",
+      "school": "unknown",
+      "club": "Sukeban"
+    },
+    "toki": {
+      "franchise": "blue_archive",
+      "school": "Millennium",
+      "club": "C&C"
+    },
+    "toki_(abi-eshuh)_(blue_archive)": {
+      "event": "Abi-Eshuh motif"
+    },
+    "toki_(bunny)_(blue_archive)": {
+      "event": "Bunny Chasers on Board"
+    },
+    "toki_(school_uniform)_(blue_archive)": {
+      "event": "C&C school uniform motif"
+    },
+    "trinity_student": {
+      "franchise": "blue_archive",
+      "school": "Trinity",
+      "club": "generic student"
+    }
+  }
+}
