@@ -188,6 +188,21 @@ def test_nearest_tags_excludes_self_and_missing_tag_errors(tmp_path) -> None:
         index.nearest("missing")
 
 
+def test_similarity_matrix_is_symmetric_and_ordered(tmp_path) -> None:
+    embeddings_dir = _write_manual_embedding_dir(tmp_path)
+    index = TagEmbeddingIndex.from_dir(embeddings_dir)
+
+    matrix = index.similarity_matrix(["a", "b", "c"])
+
+    assert matrix.shape == (3, 3)
+    assert np.allclose(matrix, matrix.T)
+    assert np.allclose(np.diag(matrix), 1.0)
+    assert matrix[0, 1] == pytest.approx(index.similarity("a", "b"))
+    assert matrix[0, 2] == pytest.approx(0.0)
+    with pytest.raises(ValueError, match="Unknown tag"):
+        index.similarity_matrix(["a", "missing"])
+
+
 def test_embedding_cli_smoke(tmp_path) -> None:
     processed = _write_processed_fixture(tmp_path)
     manual_embeddings = _write_manual_embedding_dir(tmp_path)
@@ -246,3 +261,33 @@ def test_embedding_cli_smoke(tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "cosine(a, b)" in result.output
+
+    result = runner.invoke(
+        app,
+        [
+            "evaluate-embeddings",
+            "--embeddings",
+            str(manual_embeddings),
+            "--tags",
+            "a,b,c",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "tag\ta\tb\tc" in result.output
+    assert "a\t1.000000" in result.output
+
+    result = runner.invoke(
+        app,
+        [
+            "evaluate-embeddings",
+            "--embeddings",
+            str(manual_embeddings),
+            "--tags",
+            "a,b",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert '"tags": [' in result.output
+    assert '"matrix": [' in result.output

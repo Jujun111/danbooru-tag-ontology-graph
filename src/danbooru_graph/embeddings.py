@@ -282,6 +282,13 @@ class TagEmbeddingIndex:
         row_b = self._row_for_tag(tag_b)
         return float(np.dot(self.embeddings[row_a], self.embeddings[row_b]))
 
+    def similarity_matrix(self, tags: list[str]) -> np.ndarray:
+        if not tags:
+            raise ValueError("At least one tag is required.")
+        rows = [self._row_for_tag(tag) for tag in tags]
+        vectors = self.embeddings[rows]
+        return vectors @ vectors.T
+
     def nearest(self, tag: str, top_k: int = 20) -> list[dict[str, Any]]:
         if top_k < 1:
             raise ValueError("top_k must be at least 1.")

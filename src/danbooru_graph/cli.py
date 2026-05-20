@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import json
+from io import StringIO
 from pathlib import Path
 
 import typer
@@ -416,6 +418,49 @@ def similarity_tags(
         typer.echo(json.dumps({"tag_a": tag_a, "tag_b": tag_b, "score": score}, ensure_ascii=False, indent=2))
         return
     typer.echo(f"cosine({tag_a}, {tag_b}) = {score:.6f}")
+
+
+@app.command("evaluate-embeddings")
+def evaluate_embeddings(
+    embeddings: Path = typer.Option(..., "--embeddings", help="Embedding artifact directory."),
+    tags: str = typer.Option(..., "--tags", help="Comma-separated tags to compare."),
+    output_format: str = typer.Option("text", "--format", help="text, csv, or json."),
+) -> None:
+    selected_tags = parse_tags(tags)
+    if not selected_tags:
+        raise typer.BadParameter("--tags must contain at least one tag.")
+    if output_format not in {"text", "csv", "json"}:
+        raise typer.BadParameter("--format must be one of: text, csv, json.")
+
+    index = TagEmbeddingIndex.from_dir(embeddings)
+    matrix = index.similarity_matrix(selected_tags)
+
+    if output_format == "json":
+        typer.echo(
+            json.dumps(
+                {
+                    "tags": selected_tags,
+                    "matrix": matrix.tolist(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
+    if output_format == "csv":
+        output = StringIO()
+        writer = csv.writer(output, lineterminator="\n")
+        writer.writerow(["tag", *selected_tags])
+        for tag, row in zip(selected_tags, matrix):
+            writer.writerow([tag, *(f"{float(value):.6f}" for value in row)])
+        typer.echo(output.getvalue().rstrip())
+        return
+
+    typer.echo("\t".join(["tag", *selected_tags]))
+    for tag, row in zip(selected_tags, matrix):
+        values = [f"{float(value):.6f}" for value in row]
+        typer.echo("\t".join([tag, *values]))
 
 
 if __name__ == "__main__":
