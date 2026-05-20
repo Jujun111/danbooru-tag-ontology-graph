@@ -30,6 +30,10 @@ def _format_alpha(alpha: float) -> str:
     return f"{alpha:g}".replace("-", "m").replace(".", "p")
 
 
+def _format_threshold(value: float) -> str:
+    return f"{value:g}".replace("-", "m").replace(".", "p")
+
+
 def default_embedding_dir(
     processed_dir: Path,
     pair: str,
@@ -37,6 +41,8 @@ def default_embedding_dir(
     dim: int,
     alpha: float = 0.5,
     drop_components: int = 0,
+    min_npmi: float | None = None,
+    min_co_count: int | None = None,
 ) -> Path:
     stem = pair.replace("-", "_")
     suffix_parts = []
@@ -44,6 +50,10 @@ def default_embedding_dir(
         suffix_parts.append(f"a{_format_alpha(alpha)}")
     if drop_components:
         suffix_parts.append(f"drop{drop_components}")
+    if min_npmi is not None:
+        suffix_parts.append(f"npmi{_format_threshold(min_npmi)}")
+    if min_co_count is not None:
+        suffix_parts.append(f"co{min_co_count}")
     suffix = "" if not suffix_parts else "_" + "_".join(suffix_parts)
     return processed_dir / "embeddings" / f"{stem}_{method}_d{dim}{suffix}"
 
@@ -163,6 +173,8 @@ def build_svd_embeddings(
     weight_column: str = "discounted_ppmi",
     alpha: float = 0.5,
     drop_components: int = 0,
+    min_npmi: float | None = None,
+    min_co_count: int | None = None,
     normalize: bool = True,
     seed: int = 42,
     solver: str = "auto",
@@ -180,6 +192,10 @@ def build_svd_embeddings(
         raise ValueError("drop_components must be non-negative.")
     if drop_components >= dim:
         raise ValueError("drop_components must be smaller than dim.")
+    if min_npmi is not None and not -1.0 <= min_npmi <= 1.0:
+        raise ValueError("min_npmi must be between -1.0 and 1.0.")
+    if min_co_count is not None and min_co_count < 1:
+        raise ValueError("min_co_count must be at least 1.")
     _validate_weight_column(weight_column)
 
     vocab_path = processed_dir / "tag_vocab.parquet"
@@ -196,6 +212,12 @@ def build_svd_embeddings(
     edges = pl.read_parquet(edges_path)
     if "category_a" in edges.columns and "category_b" in edges.columns:
         edges = edges.filter((pl.col("category_a") == left_category) & (pl.col("category_b") == right_category))
+    source_edge_count = edges.height
+    if min_npmi is not None:
+        edges = edges.filter(pl.col("npmi") >= min_npmi)
+    if min_co_count is not None:
+        edges = edges.filter(pl.col("co_count") >= min_co_count)
+    filtered_edge_count = edges.height
     matrix = build_symmetric_weight_matrix(edges, vocab, weight_column=weight_column)
     if matrix.nnz == 0:
         raise ValueError("Cannot build embeddings from an empty sparse matrix.")
@@ -218,6 +240,8 @@ def build_svd_embeddings(
         dim,
         alpha=alpha,
         drop_components=drop_components,
+        min_npmi=min_npmi,
+        min_co_count=min_co_count,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     np.save(output_dir / "embeddings.npy", embeddings.astype(np.float32))
@@ -230,6 +254,10 @@ def build_svd_embeddings(
         "weight_column": weight_column,
         "alpha": alpha,
         "drop_components": drop_components,
+        "min_npmi": min_npmi,
+        "min_co_count": min_co_count,
+        "source_edge_count": source_edge_count,
+        "filtered_edge_count": filtered_edge_count,
         "mean_centered": bool(drop_components),
         "dropped_component_singular_values": dropped_component_singular_values,
         "normalize": normalize,

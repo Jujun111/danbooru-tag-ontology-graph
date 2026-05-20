@@ -164,6 +164,17 @@ def test_drop_components_changes_default_output_dir_and_config(tmp_path) -> None
         default_embedding_dir(processed, "character-character", "svd", 2, alpha=0.0, drop_components=1).name
         == "character_character_svd_d2_a0_drop1"
     )
+    assert (
+        default_embedding_dir(
+            processed,
+            "character-character",
+            "svd",
+            2,
+            min_npmi=0.15,
+            min_co_count=25,
+        ).name
+        == "character_character_svd_d2_npmi0p15_co25"
+    )
 
     out_dir = build_svd_embeddings(processed, dim=2, seed=0, drop_components=1)
     config = json.loads((out_dir / "config.json").read_text(encoding="utf-8"))
@@ -172,6 +183,20 @@ def test_drop_components_changes_default_output_dir_and_config(tmp_path) -> None
     assert config["drop_components"] == 1
     assert config["mean_centered"] is True
     assert len(config["dropped_component_singular_values"]) == 1
+
+
+def test_edge_filtering_updates_config_and_matrix_density(tmp_path) -> None:
+    processed = _write_processed_fixture(tmp_path)
+
+    out_dir = build_svd_embeddings(processed, dim=2, seed=0, min_npmi=0.7, min_co_count=40)
+    config = json.loads((out_dir / "config.json").read_text(encoding="utf-8"))
+
+    assert out_dir.name == "character_character_svd_d2_npmi0p7_co40"
+    assert config["min_npmi"] == pytest.approx(0.7)
+    assert config["min_co_count"] == 40
+    assert config["source_edge_count"] == 4
+    assert config["filtered_edge_count"] == 2
+    assert config["matrix_nnz"] == 4
 
 
 def test_nearest_tags_excludes_self_and_missing_tag_errors(tmp_path) -> None:
@@ -221,6 +246,10 @@ def test_embedding_cli_smoke(tmp_path) -> None:
             "0.0",
             "--drop-components",
             "1",
+            "--min-npmi",
+            "0.1",
+            "--min-co-count",
+            "8",
             "--seed",
             "0",
             "--out",

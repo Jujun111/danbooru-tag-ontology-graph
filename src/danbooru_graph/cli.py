@@ -359,6 +359,19 @@ def build_embeddings(
         min=0,
         help="All-but-the-top post-processing: mean-center and remove the top N dense components.",
     ),
+    min_npmi: float | None = typer.Option(
+        None,
+        "--min-npmi",
+        min=-1.0,
+        max=1.0,
+        help="Filter scored edges to NPMI >= this value before factorization.",
+    ),
+    min_co_count: int | None = typer.Option(
+        None,
+        "--min-co-count",
+        min=1,
+        help="Filter scored edges to co_count >= this value before factorization.",
+    ),
     seed: int = typer.Option(42, "--seed", help="Deterministic SVD seed."),
     solver: str = typer.Option(
         "auto",
@@ -381,6 +394,8 @@ def build_embeddings(
         weight_column=weight_column,
         alpha=alpha,
         drop_components=drop_components,
+        min_npmi=min_npmi,
+        min_co_count=min_co_count,
         normalize=normalize,
         seed=seed,
         solver=solver,

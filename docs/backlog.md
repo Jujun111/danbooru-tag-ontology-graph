@@ -6,20 +6,11 @@ Can character-character graph embeddings separate fine-grained Blue Archive moti
 
 ## Active
 
-No active task after T001 completion.
+No active task after T003 completion.
 
 ## Next
 
-### T003: Add edge filtering before factorization
-
-Depends on:
-T001
-
-Goal:
-Test whether filtering weak background edges helps recover subgroup structure.
-
-Status:
-not started
+No immediate next task selected.
 
 ## Parked
 
@@ -32,6 +23,44 @@ Status:
 parked
 
 ## Done / investigated
+
+### T003: Add edge filtering before factorization
+
+Finding:
+Edge filtering before SVD is now implemented with `--min-npmi` and `--min-co-count`.
+It can break the all-Blue-Archive cosine collapse, but the strict test graph over-fragments and produces degenerate near-identical micro-components.
+
+Artifacts:
+- Strict: `data/processed/embeddings/character_character_svd_d128_npmi0p5_co25`
+- Mild: `data/processed/embeddings/character_character_svd_d128_npmi0p15_co15`
+
+Strict run details:
+- Source edges: 837,806
+- Filtered edges: 98,793
+- Matrix nnz: 197,586
+
+Selected strict cosine comparison (`min_npmi=0.50`, `min_co_count=25`):
+
+| Pair | Cosine |
+| --- | ---: |
+| Asuna / Karin | -0.033344 |
+| Asuna / Neru | -0.033343 |
+| Asuna / Hina | 0.988677 |
+| Karin / Neru | 1.000000 |
+| Karin / Akane | 1.000000 |
+| Neru / Hina | -0.039762 |
+
+Mild run details:
+- Source edges: 837,806
+- Filtered edges: 346,014
+- Matrix nnz: 692,028
+- The five-tag Blue Archive probe still collapses to cosine `1.000000` across all pairs.
+
+Interpretation:
+Filtering weak edges is necessary but not sufficient. A very mild filter preserves the original IP-dominant geometry, while a strict filter removes too much connective tissue and makes SVD unstable for sparse local neighborhoods. The next embedding improvement should account for filtered-node degree, active-vocabulary coverage, or a threshold sweep before changing solvers.
+
+Status:
+done
 
 ### T002: Compare NPMI-weighted SVD against discounted PPMI
 
