@@ -6,7 +6,7 @@ Can character-character graph embeddings separate fine-grained Blue Archive moti
 
 ## Active
 
-No active task after T003 completion.
+No active task after Item2Vec baseline completion.
 
 ## Next
 
@@ -23,6 +23,28 @@ Status:
 parked
 
 ## Done / investigated
+
+### T005: Add Item2Vec character embedding baseline
+
+Finding:
+Added a character-only Item2Vec backend using Skip-gram negative sampling over post-level character tag sets.
+This provides a local-context representation-learning baseline that avoids explicit factorization of the global scored edge matrix.
+
+Acceptance criteria:
+- `build-embeddings --method item2vec` trains from `post_tags.parquet`
+- output remains compatible with `nearest-tags`, `similarity-tags`, and `evaluate-embeddings`
+- corpus iterator skips singleton character posts and preserves tag-id order
+- artifact config records training hyperparameters and source paths
+- smoke tests pass on a small fixture
+
+Default artifact:
+`data/processed/embeddings/character_item2vec_d128`
+
+Recommended BA probe:
+`danbooru-graph evaluate-embeddings --embeddings data/processed/embeddings/character_item2vec_d128 --tags "asuna_(blue_archive),karin_(blue_archive),neru_(blue_archive),hina_(blue_archive),akane_(blue_archive)"`
+
+Status:
+done
 
 ### T003-diagnostics: Add embedding graph diagnostics
 

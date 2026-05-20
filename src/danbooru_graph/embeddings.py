@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pyarrow.parquet as pq
 import polars as pl
 from scipy.sparse import coo_matrix, csr_matrix
 from scipy.sparse.csgraph import connected_components
@@ -59,6 +60,10 @@ def default_embedding_dir(
     return processed_dir / "embeddings" / f"{stem}_{method}_d{dim}{suffix}"
 
 
+def default_item2vec_embedding_dir(processed_dir: Path, category: str, dim: int) -> Path:
+    return processed_dir / "embeddings" / f"{category}_item2vec_d{dim}"
+
+
 def _validate_weight_column(weight_column: str) -> None:
     if weight_column not in EMBEDDING_WEIGHT_COLUMNS:
         choices = ", ".join(sorted(EMBEDDING_WEIGHT_COLUMNS))
@@ -80,6 +85,78 @@ def _embedding_vocab(vocab: pl.DataFrame, category: str) -> pl.DataFrame:
     if len(tag_ids) != len(set(tag_ids)):
         raise ValueError("tag_id values must be unique.")
     return selected.with_row_index("embedding_idx")
+
+
+def _processed_vocab_and_post_tags(processed_dir: Path, category: str) -> tuple[pl.DataFrame, Path, Path]:
+    vocab_path = processed_dir / "tag_vocab.parquet"
+    post_tags_path = processed_dir / "post_tags.parquet"
+    if not vocab_path.exists():
+        raise FileNotFoundError(f"Missing tag vocabulary: {vocab_path}")
+    if not post_tags_path.exists():
+        raise FileNotFoundError(f"Missing post-tag table: {post_tags_path}")
+    return _embedding_vocab(pl.read_parquet(vocab_path), category), vocab_path, post_tags_path
+
+
+class Item2VecCorpus:
+    """Repeatable character-only sentence iterator backed by post_tags.parquet."""
+
+    def __init__(
+        self,
+        processed_dir: Path,
+        category: str = "character",
+        min_sentence_length: int = 2,
+        batch_size: int = 200_000,
+    ) -> None:
+        if min_sentence_length < 2:
+            raise ValueError("min_sentence_length must be at least 2.")
+        if batch_size < 1:
+            raise ValueError("batch_size must be at least 1.")
+        self.vocab, _, self.post_tags_path = _processed_vocab_and_post_tags(processed_dir, category)
+        self.category = category
+        self.min_sentence_length = min_sentence_length
+        self.batch_size = batch_size
+        self._tag_by_id = {
+            int(tag_id): tag
+            for tag_id, tag in self.vocab.select("tag_id", "tag").iter_rows()
+        }
+
+    def __iter__(self):
+        current_post_idx: int | None = None
+        current_tags: list[tuple[int, str]] = []
+
+        def maybe_yield_sentence():
+            if len(current_tags) >= self.min_sentence_length:
+                return [tag for _, tag in sorted(current_tags, key=lambda item: item[0])]
+            return None
+
+        parquet_file = pq.ParquetFile(self.post_tags_path)
+        for batch in parquet_file.iter_batches(
+            batch_size=self.batch_size,
+            columns=["post_idx", "tag_id", "category"],
+        ):
+            post_indices = batch.column(batch.schema.get_field_index("post_idx")).to_pylist()
+            tag_ids = batch.column(batch.schema.get_field_index("tag_id")).to_pylist()
+            categories = batch.column(batch.schema.get_field_index("category")).to_pylist()
+            for post_idx, tag_id, category in zip(post_indices, tag_ids, categories):
+                post_idx = int(post_idx)
+                if current_post_idx is None:
+                    current_post_idx = post_idx
+                elif post_idx != current_post_idx:
+                    sentence = maybe_yield_sentence()
+                    if sentence is not None:
+                        yield sentence
+                    current_post_idx = post_idx
+                    current_tags = []
+
+                if category != self.category:
+                    continue
+                tag = self._tag_by_id.get(int(tag_id))
+                if tag is not None:
+                    current_tags.append((int(tag_id), tag))
+
+        sentence = maybe_yield_sentence()
+        if sentence is not None:
+            yield sentence
 
 
 def build_symmetric_weight_matrix(
@@ -313,6 +390,109 @@ def _run_svds(matrix: csr_matrix, dim: int, seed: int, solver: str) -> tuple[np.
             errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
     detail = "; ".join(errors)
     raise RuntimeError(f"SVD failed for all requested solvers. {detail}")
+
+
+def build_item2vec_embeddings(
+    processed_dir: Path,
+    category: str = "character",
+    dim: int = 128,
+    window: int = 50,
+    negative: int = 10,
+    sample: float = 1e-4,
+    epochs: int = 5,
+    workers: int = 1,
+    min_sentence_length: int = 2,
+    normalize: bool = True,
+    seed: int = 42,
+    out_dir: Path | None = None,
+) -> Path:
+    """Train character-only Item2Vec embeddings from post-level tag sets."""
+    if category != "character":
+        raise ValueError("Item2Vec v1 supports only category='character'.")
+    if dim < 1:
+        raise ValueError("dim must be at least 1.")
+    if window < 1:
+        raise ValueError("window must be at least 1.")
+    if negative < 1:
+        raise ValueError("negative must be at least 1.")
+    if sample < 0:
+        raise ValueError("sample must be non-negative.")
+    if epochs < 1:
+        raise ValueError("epochs must be at least 1.")
+    if workers < 1:
+        raise ValueError("workers must be at least 1.")
+    if min_sentence_length < 2:
+        raise ValueError("min_sentence_length must be at least 2.")
+
+    try:
+        from gensim.models import Word2Vec
+    except ImportError as exc:  # pragma: no cover - depends on installation state.
+        raise RuntimeError("Item2Vec requires gensim. Install with: python -m pip install -e .") from exc
+
+    corpus = Item2VecCorpus(
+        processed_dir,
+        category=category,
+        min_sentence_length=min_sentence_length,
+    )
+    model = Word2Vec(
+        vector_size=dim,
+        window=window,
+        min_count=1,
+        sg=1,
+        hs=0,
+        negative=negative,
+        sample=sample,
+        ns_exponent=0.75,
+        workers=workers,
+        seed=seed,
+    )
+    model.build_vocab(corpus)
+    if model.corpus_count == 0:
+        raise ValueError("Cannot train Item2Vec: no sentences met min_sentence_length.")
+    model.train(corpus, total_examples=model.corpus_count, epochs=epochs)
+
+    trained_tags = set(model.wv.key_to_index)
+    trained_vocab = (
+        corpus.vocab.drop("embedding_idx")
+        .filter(pl.col("tag").is_in(trained_tags))
+        .sort("tag_id")
+        .with_row_index("embedding_idx")
+    )
+    if trained_vocab.is_empty():
+        raise ValueError("Cannot train Item2Vec: no tags were retained in the trained vocabulary.")
+
+    embeddings = np.vstack([model.wv.get_vector(tag) for tag in trained_vocab["tag"].to_list()]).astype(np.float32)
+    if normalize:
+        embeddings = _normalize_rows(embeddings)
+
+    output_dir = out_dir or default_item2vec_embedding_dir(processed_dir, category, dim)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    np.save(output_dir / "embeddings.npy", embeddings.astype(np.float32))
+    trained_vocab.write_parquet(output_dir / "embedding_vocab.parquet")
+    config = {
+        "method": "item2vec",
+        "category": category,
+        "dim": dim,
+        "window": window,
+        "negative": negative,
+        "sample": sample,
+        "epochs": epochs,
+        "workers": workers,
+        "min_sentence_length": min_sentence_length,
+        "min_count": 1,
+        "sg": 1,
+        "hs": 0,
+        "ns_exponent": 0.75,
+        "normalize": normalize,
+        "seed": seed,
+        "sentence_count": int(model.corpus_count),
+        "total_words": int(model.corpus_total_words),
+        "trained_tag_count": trained_vocab.height,
+        "source_post_tags": str(corpus.post_tags_path),
+        "source_vocab": str(processed_dir / "tag_vocab.parquet"),
+    }
+    (output_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+    return output_dir
 
 
 def build_svd_embeddings(

@@ -98,6 +98,8 @@ co-drawn micro-motifs.
 - Held-out copyright purity evaluation.
 - Gephi-ready GEXF/GraphML export for network visualization.
 - Truncated SVD embeddings from the discounted PPMI graph for cosine search.
+- Character-only Item2Vec embeddings trained from post-level tag sets with
+  Skip-gram negative sampling.
 
 ## Quickstart
 
@@ -130,6 +132,25 @@ Use `--alpha` to tune singular-value scaling. The default `--alpha 0.5` uses
 Use `--drop-components N` for All-but-the-top post-processing. When `N > 0`,
 the dense embeddings are mean-centered and the top `N` principal components are
 removed before row normalization.
+
+Train a local-context Item2Vec baseline:
+
+```powershell
+danbooru-graph build-embeddings `
+  --processed data/processed `
+  --method item2vec `
+  --categories character `
+  --dim 128 `
+  --window 50 `
+  --negative 10 `
+  --sample 1e-4 `
+  --epochs 5 `
+  --workers 8
+
+danbooru-graph evaluate-embeddings `
+  --embeddings data/processed/embeddings/character_item2vec_d128 `
+  --tags "asuna_(blue_archive),karin_(blue_archive),neru_(blue_archive),hina_(blue_archive),akane_(blue_archive)"
+```
 
 Detect communities and evaluate them against held-out copyright labels:
 

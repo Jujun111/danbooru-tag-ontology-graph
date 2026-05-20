@@ -130,6 +130,38 @@ danbooru-graph similarity-tags `
 The generated `embeddings.npy`, `embedding_vocab.parquet`, and `config.json`
 stay under ignored `data/processed/`.
 
+## Item2Vec Embeddings
+
+The Item2Vec baseline trains Skip-gram with negative sampling from post-level
+character tag sets. It uses `post_tags.parquet` directly instead of the scored
+edge table, so it can learn from local image-level contexts rather than only
+from the global co-occurrence matrix.
+
+```powershell
+danbooru-graph build-embeddings `
+  --processed data/processed `
+  --method item2vec `
+  --categories character `
+  --dim 128 `
+  --window 50 `
+  --negative 10 `
+  --sample 1e-4 `
+  --epochs 5 `
+  --workers 8
+
+danbooru-graph evaluate-embeddings `
+  --embeddings data/processed/embeddings/character_item2vec_d128 `
+  --tags "asuna_(blue_archive),karin_(blue_archive),neru_(blue_archive),hina_(blue_archive),akane_(blue_archive)"
+
+danbooru-graph nearest-tags `
+  --embeddings data/processed/embeddings/character_item2vec_d128 `
+  --tag "asuna_(blue_archive)" `
+  --top-k 20
+```
+
+For exact repeatability during debugging, use `--workers 1`. For full local
+training, `--workers 8` is faster but may not be bitwise deterministic.
+
 ## Held-Out Evaluation
 
 ```powershell

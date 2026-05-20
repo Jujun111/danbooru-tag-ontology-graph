@@ -10,8 +10,11 @@ from typer.testing import CliRunner
 from danbooru_graph.cli import app
 from danbooru_graph.embeddings import (
     TagEmbeddingIndex,
+    Item2VecCorpus,
+    build_item2vec_embeddings,
     build_svd_embeddings,
     build_symmetric_weight_matrix,
+    default_item2vec_embedding_dir,
     default_embedding_dir,
     diagnose_embedding_graph,
     _remove_top_components,
@@ -23,12 +26,29 @@ def _write_processed_fixture(tmp_path):
     processed.mkdir()
     pl.DataFrame(
         {
-            "tag_id": [0, 1, 2, 3],
-            "category": ["character"] * 4,
-            "tag": ["a", "b", "c", "d"],
-            "count": [100, 90, 80, 70],
+            "tag_id": [0, 1, 2, 3, 4],
+            "category": ["character", "character", "character", "character", "general"],
+            "tag": ["a", "b", "c", "d", "blue_sky"],
+            "count": [100, 90, 80, 70, 60],
         }
     ).write_parquet(processed / "tag_vocab.parquet")
+    pl.DataFrame(
+        {
+            "post_idx": [0, 0, 0, 1, 2, 2, 3, 4, 4],
+            "tag_id": [0, 1, 4, 2, 1, 3, 4, 2, 3],
+            "category": [
+                "character",
+                "character",
+                "general",
+                "character",
+                "character",
+                "character",
+                "general",
+                "character",
+                "character",
+            ],
+        }
+    ).write_parquet(processed / "post_tags.parquet")
     pl.DataFrame(
         {
             "tag_a_id": [0, 0, 1, 2],
@@ -200,6 +220,34 @@ def test_edge_filtering_updates_config_and_matrix_density(tmp_path) -> None:
     assert config["matrix_nnz"] == 4
 
 
+def test_item2vec_corpus_yields_character_sentences_in_tag_order(tmp_path) -> None:
+    processed = _write_processed_fixture(tmp_path)
+    corpus = Item2VecCorpus(processed, min_sentence_length=2)
+
+    assert list(corpus) == [["a", "b"], ["b", "d"], ["c", "d"]]
+
+
+def test_build_item2vec_embeddings_writes_compatible_artifacts(tmp_path) -> None:
+    processed = _write_processed_fixture(tmp_path)
+
+    assert default_item2vec_embedding_dir(processed, "character", 8).name == "character_item2vec_d8"
+    out_dir = build_item2vec_embeddings(processed, dim=8, epochs=2, seed=0)
+
+    embeddings = np.load(out_dir / "embeddings.npy")
+    vocab = pl.read_parquet(out_dir / "embedding_vocab.parquet")
+    config = json.loads((out_dir / "config.json").read_text(encoding="utf-8"))
+    norms = np.linalg.norm(embeddings, axis=1)
+
+    assert out_dir.name == "character_item2vec_d8"
+    assert embeddings.shape == (4, 8)
+    assert vocab["tag"].to_list() == ["a", "b", "c", "d"]
+    assert config["method"] == "item2vec"
+    assert config["category"] == "character"
+    assert config["sentence_count"] == 3
+    assert config["trained_tag_count"] == 4
+    assert np.allclose(norms[norms > 0], 1.0, atol=1e-5)
+
+
 def test_diagnose_embedding_graph_reports_filter_structure(tmp_path) -> None:
     processed = _write_processed_fixture(tmp_path)
 
@@ -287,6 +335,56 @@ def test_embedding_cli_smoke(tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert (out_dir / "embeddings.npy").exists()
+
+    item2vec_out = tmp_path / "item2vec_out"
+    result = runner.invoke(
+        app,
+        [
+            "build-embeddings",
+            "--processed",
+            str(processed),
+            "--method",
+            "item2vec",
+            "--dim",
+            "8",
+            "--epochs",
+            "2",
+            "--seed",
+            "0",
+            "--out",
+            str(item2vec_out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (item2vec_out / "embeddings.npy").exists()
+
+    result = runner.invoke(
+        app,
+        [
+            "nearest-tags",
+            "--embeddings",
+            str(item2vec_out),
+            "--tag",
+            "a",
+            "--top-k",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "score=" in result.output
+
+    result = runner.invoke(
+        app,
+        [
+            "evaluate-embeddings",
+            "--embeddings",
+            str(item2vec_out),
+            "--tags",
+            "a,b",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "tag\ta\tb" in result.output
 
     result = runner.invoke(
         app,

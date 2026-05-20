@@ -21,6 +21,7 @@ from danbooru_graph.embeddings import (
     EMBEDDING_WEIGHT_COLUMNS,
     SVD_SOLVERS,
     TagEmbeddingIndex,
+    build_item2vec_embeddings as build_item2vec_embeddings_pipeline,
     build_svd_embeddings as build_svd_embeddings_pipeline,
     diagnose_embedding_graph as diagnose_embedding_graph_pipeline,
 )
@@ -340,8 +341,13 @@ def query_characters(
 def build_embeddings(
     processed: Path = typer.Option(..., "--processed", help="Processed directory."),
     pair: str = typer.Option("character-character", "--pair", help="Same-category pair, e.g. character-character."),
-    method: str = typer.Option("svd", "--method", help="Embedding method. Only svd is supported in v1."),
+    method: str = typer.Option("svd", "--method", help="Embedding method: svd or item2vec."),
     dim: int = typer.Option(128, "--dim", min=1, help="Embedding dimension."),
+    categories: str = typer.Option(
+        "character",
+        "--categories",
+        help="Item2Vec training categories. V1 supports only character.",
+    ),
     weight_column: str = typer.Option(
         "discounted_ppmi",
         "--weight-column",
@@ -379,15 +385,55 @@ def build_embeddings(
         "--solver",
         help=f"SVD solver. One of: {', '.join(sorted(SVD_SOLVERS))}.",
     ),
+    window: int = typer.Option(50, "--window", min=1, help="Item2Vec context window."),
+    negative: int = typer.Option(10, "--negative", min=1, help="Item2Vec negative samples."),
+    sample: float = typer.Option(1e-4, "--sample", min=0.0, help="Item2Vec frequent-token subsampling."),
+    epochs: int = typer.Option(5, "--epochs", min=1, help="Item2Vec training epochs."),
+    workers: int = typer.Option(1, "--workers", min=1, help="Item2Vec worker threads."),
+    min_sentence_length: int = typer.Option(
+        2,
+        "--min-sentence-length",
+        min=2,
+        help="Skip Item2Vec post sentences shorter than this.",
+    ),
     normalize: bool = typer.Option(True, "--normalize/--no-normalize", help="L2-normalize rows for cosine search."),
     out: Path | None = typer.Option(None, "--out", help="Optional embedding output directory."),
 ) -> None:
-    if method != "svd":
-        raise typer.BadParameter("--method currently supports only svd.")
+    if method not in {"svd", "item2vec"}:
+        raise typer.BadParameter("--method must be either svd or item2vec.")
     if weight_column not in EMBEDDING_WEIGHT_COLUMNS:
         raise typer.BadParameter(f"--weight-column must be one of: {', '.join(sorted(EMBEDDING_WEIGHT_COLUMNS))}.")
     if solver not in SVD_SOLVERS:
         raise typer.BadParameter(f"--solver must be one of: {', '.join(sorted(SVD_SOLVERS))}.")
+    if method == "item2vec":
+        if categories.strip() != "character":
+            raise typer.BadParameter("--categories currently supports only character for item2vec.")
+        if pair != "character-character":
+            raise typer.BadParameter("--pair is SVD-only and must stay at the default for item2vec.")
+        if weight_column != "discounted_ppmi":
+            raise typer.BadParameter("--weight-column is SVD-only and must stay at the default for item2vec.")
+        if not (alpha == 0.5 and drop_components == 0 and min_npmi is None and min_co_count is None and solver == "auto"):
+            raise typer.BadParameter(
+                "SVD-only options are not applied to item2vec: "
+                "--alpha, --drop-components, --min-npmi, --min-co-count, and --solver."
+            )
+        out_dir = build_item2vec_embeddings_pipeline(
+            processed,
+            category="character",
+            dim=dim,
+            window=window,
+            negative=negative,
+            sample=sample,
+            epochs=epochs,
+            workers=workers,
+            min_sentence_length=min_sentence_length,
+            normalize=normalize,
+            seed=seed,
+            out_dir=out,
+        )
+        typer.echo(f"Wrote Item2Vec embeddings to {out_dir}")
+        return
+
     out_dir = build_svd_embeddings_pipeline(
         processed,
         pair=pair,
