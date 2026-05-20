@@ -6,7 +6,7 @@ Can character-character graph embeddings separate fine-grained Blue Archive moti
 
 ## Active
 
-No active task after Item2Vec baseline completion.
+No active task after full Item2Vec experiment completion.
 
 ## Next
 
@@ -23,6 +23,45 @@ Status:
 parked
 
 ## Done / investigated
+
+### T006: Run full Item2Vec BA probe
+
+Finding:
+Full character-only Item2Vec training successfully breaks the SVD same-IP cosine collapse on the Blue Archive probe.
+The model was trained with Skip-gram negative sampling from post-level character tag sets.
+
+Command:
+`danbooru-graph build-embeddings --processed data/processed --method item2vec --categories character --dim 128 --window 50 --negative 10 --sample 1e-4 --epochs 5 --workers 8`
+
+Artifact:
+`data/processed/embeddings/character_item2vec_d128`
+
+Training summary:
+- Sentences: 3,273,233 posts with at least two retained character tags
+- Total words: 9,489,198 character tokens
+- Trained tags: 28,159
+- Vector dimension: 128
+
+Selected cosine comparison:
+
+| Pair | SVD discounted PPMI | Item2Vec |
+| --- | ---: | ---: |
+| Asuna / Karin | 0.999926 | 0.824511 |
+| Asuna / Neru | 0.999855 | 0.801601 |
+| Asuna / Hina | 0.999934 | 0.577156 |
+| Asuna / Akane | 0.999925 | 0.785102 |
+| Karin / Neru | 0.999932 | 0.848246 |
+| Karin / Hina | 0.999735 | 0.603196 |
+| Karin / Akane | 0.999999 | 0.845002 |
+| Neru / Hina | 0.999667 | 0.647144 |
+| Neru / Akane | 0.999931 | 0.913994 |
+| Hina / Akane | 0.999737 | 0.639465 |
+
+Interpretation:
+Item2Vec preserves broad franchise relatedness while recovering internal motif structure. C&C-adjacent members remain high similarity, especially Neru/Akane, while Hina is pushed much farther away. This is the first embedding result that clearly separates fine-grained BA substructure without graph-filter fragmentation.
+
+Status:
+done
 
 ### T005: Add Item2Vec character embedding baseline
 
