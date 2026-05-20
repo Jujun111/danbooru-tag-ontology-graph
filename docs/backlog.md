@@ -6,7 +6,7 @@ Can character-character graph embeddings separate fine-grained Blue Archive moti
 
 ## Active
 
-No active task after full Item2Vec experiment completion.
+No active task after Item2Vec nearest-neighbor inspection.
 
 ## Next
 
@@ -23,6 +23,34 @@ Status:
 parked
 
 ## Done / investigated
+
+### T007: Inspect Item2Vec nearest neighbors for BA probe
+
+Finding:
+Item2Vec nearest-neighbor inspection confirms that the learned space is not merely a softened Blue Archive blob. It recovers C&C/event-costume motifs for Asuna, Karin, Neru, and Akane, while Hina moves toward a distinct Gehenna/Prefect-Team neighborhood.
+
+Commands:
+- `danbooru-graph nearest-tags --embeddings data/processed/embeddings/character_item2vec_d128 --tag "asuna_(blue_archive)" --top-k 20`
+- `danbooru-graph nearest-tags --embeddings data/processed/embeddings/character_item2vec_d128 --tag "karin_(blue_archive)" --top-k 20`
+- `danbooru-graph nearest-tags --embeddings data/processed/embeddings/character_item2vec_d128 --tag "neru_(blue_archive)" --top-k 20`
+- `danbooru-graph nearest-tags --embeddings data/processed/embeddings/character_item2vec_d128 --tag "hina_(blue_archive)" --top-k 20`
+- `danbooru-graph nearest-tags --embeddings data/processed/embeddings/character_item2vec_d128 --tag "akane_(blue_archive)" --top-k 20`
+
+Qualitative summary:
+- Asuna: nearest neighbors are dominated by C&C members and variants, including Akane/Karin/Neru/Toki school-uniform and bunny forms.
+- Karin: strongly C&C/event-costume centered, with Akane/Toki/Neru variants above the base Asuna tag.
+- Neru: tightly linked to Akane, Karin, Toki, and C&C-adjacent variants; Neru/Akane is the strongest base-character BA probe pair.
+- Akane: very strong C&C motif recovery, led by Akane/Neru bunny and base Neru.
+- Hina: nearest neighbors shift to Ako, Prefect Team, Gehenna student, Chinatsu, Makoto, Ibuki, and other non-C&C BA context.
+
+Noise / caveat:
+Some non-BA or ambiguous character tags appear in the 0.77-0.86 range, such as `ohitome_kohane`, `itokonoue_kaoru`, and `yamashiro_ren`. The dominant signal is still Blue Archive/C&C, but future qualitative reporting should separate franchise-consistent neighbors from cross-IP analogue/noise candidates.
+
+Interpretation:
+The nearest-neighbor view supports the cosine matrix finding: Item2Vec preserves broad franchise relatedness while learning finer local-context neighborhoods. Hina no longer behaves as if she is equally close to C&C members, which directly addresses the SVD collapse failure.
+
+Status:
+done
 
 ### T006: Run full Item2Vec BA probe
 
