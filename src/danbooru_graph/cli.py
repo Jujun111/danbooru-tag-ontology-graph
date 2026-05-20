@@ -24,6 +24,7 @@ from danbooru_graph.embeddings import (
     build_item2vec_embeddings as build_item2vec_embeddings_pipeline,
     build_svd_embeddings as build_svd_embeddings_pipeline,
     diagnose_embedding_graph as diagnose_embedding_graph_pipeline,
+    export_neighbor_case_studies as export_neighbor_case_studies_pipeline,
 )
 from danbooru_graph.recommendation import (
     DEFAULT_COMMUNITIES_PATH,
@@ -538,6 +539,26 @@ def nearest_tags(
         return
     for item in results:
         typer.echo(f"{item['rank']:>2}. {item['tag']}  score={item['score']:.6f} category={item['category']}")
+
+
+@app.command("export-neighbor-case-studies")
+def export_neighbor_case_studies(
+    embeddings: Path = typer.Option(..., "--embeddings", help="Embedding artifact directory."),
+    tags: str = typer.Option(..., "--tags", help="Comma-separated query tags."),
+    out: Path = typer.Option(..., "--out", help="Output stem; writes .csv and .md files."),
+    top_k: int = typer.Option(20, "--top-k", min=1),
+) -> None:
+    selected_tags = parse_tags(tags)
+    if not selected_tags:
+        raise typer.BadParameter("--tags must contain at least one tag.")
+    csv_path, markdown_path, records = export_neighbor_case_studies_pipeline(
+        embeddings,
+        selected_tags,
+        out,
+        top_k=top_k,
+    )
+    typer.echo(f"Wrote {len(records)} nearest-neighbor rows to {csv_path}")
+    typer.echo(f"Wrote Markdown case study to {markdown_path}")
 
 
 @app.command("similarity-tags")

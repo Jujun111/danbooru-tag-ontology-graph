@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import csv
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,7 @@ EMBEDDING_WEIGHT_COLUMNS = frozenset(
     }
 )
 SVD_SOLVERS = frozenset({"auto", "arpack", "lobpcg", "propack"})
+_TAG_QUALIFIER_RE = re.compile(r"\(([^()]*)\)")
 
 
 def _format_alpha(alpha: float) -> str:
@@ -75,6 +78,54 @@ def _validate_edge_filters(min_npmi: float | None = None, min_co_count: int | No
         raise ValueError("min_npmi must be between -1.0 and 1.0.")
     if min_co_count is not None and min_co_count < 1:
         raise ValueError("min_co_count must be at least 1.")
+
+
+def _tag_base(tag: str) -> str:
+    return tag.split("_(", 1)[0]
+
+
+def _tag_qualifiers(tag: str) -> list[str]:
+    return _TAG_QUALIFIER_RE.findall(tag)
+
+
+def _tag_franchise(tag: str, preferred: str | None = None) -> str | None:
+    qualifiers = _tag_qualifiers(tag)
+    if preferred is not None and preferred in qualifiers:
+        return preferred
+    return qualifiers[-1] if qualifiers else None
+
+
+def label_neighbor_relation(query_tag: str, neighbor_tag: str) -> dict[str, Any]:
+    """Heuristic report labels for nearest-neighbor case studies."""
+    query_base = _tag_base(query_tag)
+    query_franchise = _tag_franchise(query_tag)
+    neighbor_base = _tag_base(neighbor_tag)
+    neighbor_franchise = _tag_franchise(neighbor_tag, preferred=query_franchise)
+    same_base = query_base == neighbor_base
+    same_franchise = query_franchise is not None and query_franchise == neighbor_franchise
+
+    if query_tag == neighbor_tag:
+        label = "self"
+    elif same_base and same_franchise:
+        label = "variant"
+    elif same_base:
+        label = "same-base"
+    elif same_franchise:
+        label = "same-franchise"
+    elif query_franchise is not None and neighbor_franchise is not None:
+        label = "cross-franchise"
+    else:
+        label = "unknown"
+
+    return {
+        "label": label,
+        "query_base": query_base,
+        "neighbor_base": neighbor_base,
+        "query_franchise": query_franchise,
+        "neighbor_franchise": neighbor_franchise,
+        "same_base": same_base,
+        "same_franchise": same_franchise,
+    }
 
 
 def _embedding_vocab(vocab: pl.DataFrame, category: str) -> pl.DataFrame:
@@ -662,3 +713,103 @@ class TagEmbeddingIndex:
         for rank, item in enumerate(ranked, start=1):
             item["rank"] = rank
         return ranked
+
+
+def neighbor_case_study_records(
+    embeddings_dir: Path,
+    tags: list[str],
+    top_k: int = 20,
+) -> list[dict[str, Any]]:
+    if not tags:
+        raise ValueError("At least one tag is required.")
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1.")
+
+    index = TagEmbeddingIndex.from_dir(embeddings_dir)
+    records = []
+    for query_tag in tags:
+        for item in index.nearest(query_tag, top_k=top_k):
+            labels = label_neighbor_relation(query_tag, item["tag"])
+            records.append(
+                {
+                    "query_tag": query_tag,
+                    "rank": int(item["rank"]),
+                    "neighbor": item["tag"],
+                    "score": float(item["score"]),
+                    "label": labels["label"],
+                    "query_base": labels["query_base"],
+                    "neighbor_base": labels["neighbor_base"],
+                    "query_franchise": labels["query_franchise"],
+                    "neighbor_franchise": labels["neighbor_franchise"],
+                    "same_base": labels["same_base"],
+                    "same_franchise": labels["same_franchise"],
+                }
+            )
+    return records
+
+
+def _markdown_escape(value: Any) -> str:
+    return str(value).replace("|", "\\|")
+
+
+def export_neighbor_case_studies(
+    embeddings_dir: Path,
+    tags: list[str],
+    out_stem: Path,
+    top_k: int = 20,
+) -> tuple[Path, Path, list[dict[str, Any]]]:
+    records = neighbor_case_study_records(embeddings_dir, tags, top_k=top_k)
+    out_stem.parent.mkdir(parents=True, exist_ok=True)
+    csv_path = out_stem.with_suffix(".csv")
+    markdown_path = out_stem.with_suffix(".md")
+
+    columns = [
+        "query_tag",
+        "rank",
+        "neighbor",
+        "score",
+        "label",
+        "query_base",
+        "neighbor_base",
+        "query_franchise",
+        "neighbor_franchise",
+        "same_base",
+        "same_franchise",
+    ]
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
+        writer.writeheader()
+        for record in records:
+            row = {column: record[column] for column in columns}
+            row["score"] = f"{record['score']:.6f}"
+            writer.writerow(row)
+
+    lines = [
+        "# Nearest-Neighbor Case Studies",
+        "",
+        f"Embedding artifact: `{embeddings_dir}`",
+        f"Top K: {top_k}",
+        "",
+    ]
+    for query_tag in tags:
+        query_records = [record for record in records if record["query_tag"] == query_tag]
+        lines.extend(
+            [
+                f"## `{query_tag}`",
+                "",
+                "| Rank | Neighbor | Score | Label |",
+                "| ---: | --- | ---: | --- |",
+            ]
+        )
+        for record in query_records:
+            lines.append(
+                "| "
+                f"{record['rank']} | "
+                f"`{_markdown_escape(record['neighbor'])}` | "
+                f"{record['score']:.6f} | "
+                f"{record['label']} |"
+            )
+        lines.append("")
+
+    markdown_path.write_text("\n".join(lines), encoding="utf-8")
+    return csv_path, markdown_path, records

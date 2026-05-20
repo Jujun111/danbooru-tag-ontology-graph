@@ -17,6 +17,9 @@ from danbooru_graph.embeddings import (
     default_item2vec_embedding_dir,
     default_embedding_dir,
     diagnose_embedding_graph,
+    export_neighbor_case_studies,
+    label_neighbor_relation,
+    neighbor_case_study_records,
     _remove_top_components,
 )
 
@@ -290,6 +293,62 @@ def test_nearest_tags_excludes_self_and_missing_tag_errors(tmp_path) -> None:
         index.nearest("missing")
 
 
+def test_neighbor_case_study_labels_and_exports(tmp_path) -> None:
+    embeddings_dir = tmp_path / "embeddings"
+    embeddings_dir.mkdir()
+    embeddings = np.array(
+        [
+            [1.0, 0.0],
+            [0.99, 0.1],
+            [0.9, 0.2],
+            [0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+    np.save(embeddings_dir / "embeddings.npy", embeddings)
+    pl.DataFrame(
+        {
+            "embedding_idx": [0, 1, 2, 3],
+            "tag_id": [0, 1, 2, 3],
+            "category": ["character"] * 4,
+            "tag": [
+                "asuna_(blue_archive)",
+                "asuna_(bunny)_(blue_archive)",
+                "karin_(blue_archive)",
+                "amiya_(arknights)",
+            ],
+            "count": [100, 80, 90, 70],
+        }
+    ).write_parquet(embeddings_dir / "embedding_vocab.parquet")
+    (embeddings_dir / "config.json").write_text(json.dumps({"method": "manual"}), encoding="utf-8")
+
+    assert label_neighbor_relation("asuna_(blue_archive)", "asuna_(bunny)_(blue_archive)")["label"] == "variant"
+    assert label_neighbor_relation("asuna_(blue_archive)", "karin_(blue_archive)")["label"] == "same-franchise"
+    assert label_neighbor_relation("asuna_(blue_archive)", "amiya_(arknights)")["label"] == "cross-franchise"
+
+    records = neighbor_case_study_records(embeddings_dir, ["asuna_(blue_archive)"], top_k=3)
+
+    assert [record["label"] for record in records] == ["variant", "same-franchise", "cross-franchise"]
+    assert records[0]["same_base"] is True
+    assert records[1]["same_franchise"] is True
+
+    csv_path, markdown_path, exported = export_neighbor_case_studies(
+        embeddings_dir,
+        ["asuna_(blue_archive)"],
+        tmp_path / "case_study",
+        top_k=3,
+    )
+
+    assert exported == records
+    assert csv_path.exists()
+    assert markdown_path.exists()
+    assert "query_tag,rank,neighbor,score,label" in csv_path.read_text(encoding="utf-8")
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "## `asuna_(blue_archive)`" in markdown
+    assert "`asuna_(bunny)_(blue_archive)`" in markdown
+
+
 def test_similarity_matrix_is_symmetric_and_ordered(tmp_path) -> None:
     embeddings_dir = _write_manual_embedding_dir(tmp_path)
     index = TagEmbeddingIndex.from_dir(embeddings_dir)
@@ -421,6 +480,25 @@ def test_embedding_cli_smoke(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert '"tag": "b"' in result.output
     assert '"rank": 1' in result.output
+
+    result = runner.invoke(
+        app,
+        [
+            "export-neighbor-case-studies",
+            "--embeddings",
+            str(manual_embeddings),
+            "--tags",
+            "a,b",
+            "--out",
+            str(tmp_path / "neighbors"),
+            "--top-k",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "neighbors.csv").exists()
+    assert (tmp_path / "neighbors.md").exists()
+    assert "Wrote 4 nearest-neighbor rows" in result.output
 
     result = runner.invoke(
         app,

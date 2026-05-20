@@ -6,7 +6,7 @@ Can character-character graph embeddings separate fine-grained Blue Archive moti
 
 ## Active
 
-No active task after Item2Vec nearest-neighbor inspection.
+No active task after nearest-neighbor case study export.
 
 ## Next
 
@@ -23,6 +23,32 @@ Status:
 parked
 
 ## Done / investigated
+
+### T008: Export embedding nearest-neighbor case studies
+
+Finding:
+Added a reusable nearest-neighbor case-study exporter for embedding artifacts.
+It writes both CSV and Markdown, with heuristic labels for `variant`, `same-franchise`, `cross-franchise`, and `unknown`.
+
+Command:
+`danbooru-graph export-neighbor-case-studies --embeddings data/processed/embeddings/character_item2vec_d128 --tags "asuna_(blue_archive),karin_(blue_archive),neru_(blue_archive),hina_(blue_archive),akane_(blue_archive)" --out data/processed/evaluation/item2vec_ba_neighbor_case_studies --top-k 20`
+
+Artifacts:
+- `data/processed/evaluation/item2vec_ba_neighbor_case_studies.csv`
+- `data/processed/evaluation/item2vec_ba_neighbor_case_studies.md`
+
+BA probe label counts:
+- Asuna: 17 same-franchise, 3 unknown
+- Karin: 17 same-franchise, 1 variant, 2 unknown
+- Neru: 16 same-franchise, 2 variant, 2 unknown
+- Hina: 19 same-franchise, 1 variant
+- Akane: 17 same-franchise, 2 variant, 1 unknown
+
+Interpretation:
+The exported case study makes the qualitative Item2Vec result reusable for reporting. The heuristic labels confirm that the top neighbors are overwhelmingly Blue Archive or direct variants, while the actual semantic split between C&C and Gehenna/Prefect Team remains a higher-level domain interpretation rather than something the simple franchise heuristic can label automatically.
+
+Status:
+done
 
 ### T007: Inspect Item2Vec nearest neighbors for BA probe
 
